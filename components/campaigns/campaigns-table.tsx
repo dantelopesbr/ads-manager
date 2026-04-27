@@ -41,7 +41,7 @@ export function CampaignsTable({ campaigns, avgCpl }: Props) {
             return (
               <tr key={row.id} className="border-b hover:bg-slate-50">
                 <td className="py-3 pr-4 font-medium">
-                  <Link href={`/campaigns/${encodeURIComponent(row.id)}`} className="hover:underline">
+                  <Link href={`/campaigns/${encodeURIComponent(row.id)}`} className="text-blue-600 underline hover:text-blue-800">
                     {row.name}
                   </Link>
                   {highCpl && <Badge variant="destructive" className="ml-2 text-xs">CPL alto</Badge>}
