@@ -17,9 +17,13 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
   throw new Error('Max retries exceeded')
 }
 
+const RESYNC_AFTER_DAYS = 7
+const BATCH_LIMIT = 50
+
 export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
   const apiKey = process.env.HUBSPOT_API_KEY!
 
+  // All phones from conversions
   const { data: conversions } = await supabase
     .from('meta_ads_conversions')
     .select('phone_client')
@@ -27,10 +31,27 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
 
   if (!conversions?.length) return 0
 
-  const phones = [...new Set(conversions.map(c => c.phone_client as string))]
+  const allPhones = [...new Set(conversions.map(c => c.phone_client as string))]
+
+  // Phones already synced recently (< RESYNC_AFTER_DAYS ago)
+  const resyncCutoff = new Date()
+  resyncCutoff.setDate(resyncCutoff.getDate() - RESYNC_AFTER_DAYS)
+
+  const { data: recentlySynced } = await supabase
+    .from('hubspot_contacts')
+    .select('phone')
+    .gte('updated_at', resyncCutoff.toISOString())
+
+  const skipPhones = new Set((recentlySynced ?? []).map(c => c.phone))
+
+  // Only process new or stale contacts, limited to BATCH_LIMIT per run
+  const toSync = allPhones.filter(p => !skipPhones.has(p)).slice(0, BATCH_LIMIT)
+
+  if (toSync.length === 0) return 0
+
   let enriched = 0
 
-  for (const phone of phones) {
+  for (const phone of toSync) {
     try {
       const contact = await withRetry(() => searchContactByPhone(phone, apiKey))
       if (!contact) continue
