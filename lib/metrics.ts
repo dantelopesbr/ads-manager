@@ -13,6 +13,11 @@ export function calcROAS(dealValue: number | null, spend: number | null): number
   return dealValue / spend
 }
 
+export function formatROAS(value: number | null): string {
+  if (value === null) return '—'
+  return `${value.toFixed(2)}x`
+}
+
 export function formatCurrency(value: number | null): string {
   if (value === null) return '—'
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
