@@ -1,8 +1,33 @@
 'use client'
 
-import Link from 'next/link'
+import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { formatCurrency, formatPercent } from '@/lib/metrics'
+import { formatCurrency, formatPercent, formatROAS } from '@/lib/metrics'
+
+interface AdRow {
+  key: string
+  name: string
+  spend: number
+  leads: number
+  cpl: number | null
+  ctr: number | null
+  impressions: number
+  roas_real: number | null
+  roas_projected: number | null
+}
+
+interface AdsetRow {
+  key: string
+  name: string
+  spend: number
+  leads: number
+  cpl: number | null
+  ctr: number | null
+  impressions: number
+  roas_real: number | null
+  roas_projected: number | null
+  ads: AdRow[]
+}
 
 interface CampaignRow {
   id: string
@@ -12,7 +37,9 @@ interface CampaignRow {
   cpl: number | null
   ctr: number | null
   impressions: number
-  clicks: number
+  roas_real: number | null
+  roas_projected: number | null
+  adsets: AdsetRow[]
 }
 
 interface Props {
@@ -20,39 +47,120 @@ interface Props {
   avgCpl: number | null
 }
 
+function isBadCpl(cpl: number | null, avg: number | null) {
+  return avg !== null && cpl !== null && cpl > avg * 1.2
+}
+
+function isBadCtr(ctr: number | null) {
+  return ctr !== null && ctr < 0.005
+}
+
 export function CampaignsTable({ campaigns, avgCpl }: Props) {
+  const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set())
+  const [expandedAdsets, setExpandedAdsets] = useState<Set<string>>(new Set())
+
+  function toggleCampaign(id: string) {
+    setExpandedCampaigns(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleAdset(key: string) {
+    setExpandedAdsets(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-slate-500 text-left">
-            <th className="pb-3 pr-4 font-medium">Campanha</th>
+            <th className="pb-3 pr-4 font-medium">Nome</th>
             <th className="pb-3 pr-4 font-medium text-right">Spend</th>
             <th className="pb-3 pr-4 font-medium text-right">Leads</th>
             <th className="pb-3 pr-4 font-medium text-right">CPL</th>
             <th className="pb-3 pr-4 font-medium text-right">CTR</th>
             <th className="pb-3 pr-4 font-medium text-right">Impressões</th>
+            <th className="pb-3 pr-4 font-medium text-right">ROAS Real</th>
+            <th className="pb-3 pr-4 font-medium text-right">ROAS Proj.</th>
           </tr>
         </thead>
         <tbody>
-          {campaigns.map(row => {
-            const highCpl = avgCpl !== null && row.cpl !== null && row.cpl > avgCpl * 1.2
-            const lowCtr = row.ctr !== null && row.ctr < 0.005
+          {campaigns.map(campaign => {
+            const campExpanded = expandedCampaigns.has(campaign.id)
             return (
-              <tr key={row.id} className="border-b hover:bg-slate-50">
-                <td className="py-3 pr-4 font-medium">
-                  <Link href={`/campaigns/${encodeURIComponent(row.id)}`} className="text-blue-600 underline hover:text-blue-800">
-                    {row.name}
-                  </Link>
-                  {highCpl && <Badge variant="destructive" className="ml-2 text-xs">CPL alto</Badge>}
-                  {lowCtr && <Badge variant="outline" className="ml-2 text-xs">CTR baixo</Badge>}
-                </td>
-                <td className="py-3 pr-4 text-right">{formatCurrency(row.spend)}</td>
-                <td className="py-3 pr-4 text-right">{row.leads}</td>
-                <td className="py-3 pr-4 text-right">{formatCurrency(row.cpl)}</td>
-                <td className="py-3 pr-4 text-right">{formatPercent(row.ctr)}</td>
-                <td className="py-3 pr-4 text-right">{row.impressions.toLocaleString('pt-BR')}</td>
-              </tr>
+              <>
+                {/* Campaign row */}
+                <tr
+                  key={campaign.id}
+                  className="border-b hover:bg-slate-50 cursor-pointer select-none"
+                  onClick={() => toggleCampaign(campaign.id)}
+                >
+                  <td className="py-3 pr-4 font-medium">
+                    <span className="mr-2 text-slate-400 text-xs">{campExpanded ? '▼' : '▶'}</span>
+                    {campaign.name}
+                    {isBadCpl(campaign.cpl, avgCpl) && <Badge variant="destructive" className="ml-2 text-xs">CPL alto</Badge>}
+                    {isBadCtr(campaign.ctr) && <Badge variant="outline" className="ml-2 text-xs">CTR baixo</Badge>}
+                  </td>
+                  <td className="py-3 pr-4 text-right">{formatCurrency(campaign.spend)}</td>
+                  <td className="py-3 pr-4 text-right">{campaign.leads}</td>
+                  <td className="py-3 pr-4 text-right">{formatCurrency(campaign.cpl)}</td>
+                  <td className="py-3 pr-4 text-right">{formatPercent(campaign.ctr)}</td>
+                  <td className="py-3 pr-4 text-right">{campaign.impressions.toLocaleString('pt-BR')}</td>
+                  <td className="py-3 pr-4 text-right font-medium text-emerald-700">{formatROAS(campaign.roas_real)}</td>
+                  <td className="py-3 pr-4 text-right text-slate-500">{formatROAS(campaign.roas_projected)}</td>
+                </tr>
+
+                {/* Adset rows */}
+                {campExpanded && campaign.adsets.map(adset => {
+                  const adsetExpanded = expandedAdsets.has(adset.key)
+                  return (
+                    <>
+                      <tr
+                        key={adset.key}
+                        className="border-b bg-slate-50 hover:bg-slate-100 cursor-pointer select-none"
+                        onClick={e => { e.stopPropagation(); toggleAdset(adset.key) }}
+                      >
+                        <td className="py-2 pr-4 pl-6 text-slate-700">
+                          <span className="mr-2 text-slate-400 text-xs">{adsetExpanded ? '▼' : '▶'}</span>
+                          {adset.name}
+                          {isBadCpl(adset.cpl, avgCpl) && <Badge variant="destructive" className="ml-2 text-xs">CPL alto</Badge>}
+                          {isBadCtr(adset.ctr) && <Badge variant="outline" className="ml-2 text-xs">CTR baixo</Badge>}
+                        </td>
+                        <td className="py-2 pr-4 text-right">{formatCurrency(adset.spend)}</td>
+                        <td className="py-2 pr-4 text-right">{adset.leads}</td>
+                        <td className="py-2 pr-4 text-right">{formatCurrency(adset.cpl)}</td>
+                        <td className="py-2 pr-4 text-right">{formatPercent(adset.ctr)}</td>
+                        <td className="py-2 pr-4 text-right">{adset.impressions.toLocaleString('pt-BR')}</td>
+                        <td className="py-2 pr-4 text-right font-medium text-emerald-700">{formatROAS(adset.roas_real)}</td>
+                        <td className="py-2 pr-4 text-right text-slate-500">{formatROAS(adset.roas_projected)}</td>
+                      </tr>
+
+                      {/* Ad rows */}
+                      {adsetExpanded && adset.ads.map(ad => (
+                        <tr key={ad.key} className="border-b bg-slate-100">
+                          <td className="py-2 pr-4 pl-12 text-slate-600 text-xs">{ad.name}
+                            {isBadCpl(ad.cpl, avgCpl) && <Badge variant="destructive" className="ml-2 text-xs">CPL alto</Badge>}
+                            {isBadCtr(ad.ctr) && <Badge variant="outline" className="ml-2 text-xs">CTR baixo</Badge>}
+                          </td>
+                          <td className="py-2 pr-4 text-right text-xs">{formatCurrency(ad.spend)}</td>
+                          <td className="py-2 pr-4 text-right text-xs">{ad.leads}</td>
+                          <td className="py-2 pr-4 text-right text-xs">{formatCurrency(ad.cpl)}</td>
+                          <td className="py-2 pr-4 text-right text-xs">{formatPercent(ad.ctr)}</td>
+                          <td className="py-2 pr-4 text-right text-xs">{ad.impressions.toLocaleString('pt-BR')}</td>
+                          <td className="py-2 pr-4 text-right text-xs font-medium text-emerald-700">{formatROAS(ad.roas_real)}</td>
+                          <td className="py-2 pr-4 text-right text-xs text-slate-500">{formatROAS(ad.roas_projected)}</td>
+                        </tr>
+                      ))}
+                    </>
+                  )
+                })}
+              </>
             )
           })}
         </tbody>
