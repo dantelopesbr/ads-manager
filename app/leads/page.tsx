@@ -10,7 +10,7 @@ export default async function LeadsPage() {
   const since = format(subDays(new Date(), 30), 'yyyy-MM-dd')
 
   const { data: conversions } = await supabase
-    .from('[FH]Meta Ads')
+    .from('meta_ads_conversions')
     .select('id, phone_client, campaign_name, adset_name, ad_name, created_at')
     .gte('created_at', since)
     .order('created_at', { ascending: false })

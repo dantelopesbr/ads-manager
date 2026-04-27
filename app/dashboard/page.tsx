@@ -14,7 +14,7 @@ export default async function DashboardPage() {
 
   const [{ data: insights }, { count: totalLeads }, { data: deals }] = await Promise.all([
     supabase.from('meta_insights').select('spend, date').gte('date', since).lte('date', until),
-    supabase.from('[FH]Meta Ads').select('*', { count: 'exact', head: true }).gte('created_at', since),
+    supabase.from('meta_ads_conversions').select('*', { count: 'exact', head: true }).gte('created_at', since),
     supabase.from('hubspot_contacts').select('deal_value').not('deal_value', 'is', null),
   ])
 
@@ -30,7 +30,7 @@ export default async function DashboardPage() {
   }
 
   const { data: dailyLeads } = await supabase
-    .from('[FH]Meta Ads')
+    .from('meta_ads_conversions')
     .select('created_at')
     .gte('created_at', since)
 

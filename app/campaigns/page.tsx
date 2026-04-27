@@ -18,7 +18,7 @@ export default async function CampaignsPage() {
       .gte('date', since)
       .lte('date', until),
     supabase
-      .from('[FH]Meta Ads')
+      .from('meta_ads_conversions')
       .select('campaign_id')
       .gte('created_at', since),
   ])

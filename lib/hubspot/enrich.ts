@@ -21,7 +21,7 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
   const apiKey = process.env.HUBSPOT_API_KEY!
 
   const { data: conversions } = await supabase
-    .from('[FH]Meta Ads')
+    .from('meta_ads_conversions')
     .select('phone_client')
     .not('phone_client', 'is', null)
 

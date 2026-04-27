@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   if (insightsError) return NextResponse.json({ error: insightsError.message }, { status: 500 })
 
   const { data: conversions } = await supabase
-    .from('[FH]Meta Ads')
+    .from('meta_ads_conversions')
     .select('campaign_id, adset_id, ad_name')
     .gte('created_at', since)
     .lte('created_at', until)
