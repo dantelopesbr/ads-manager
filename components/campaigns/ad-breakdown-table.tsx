@@ -1,12 +1,12 @@
 'use client'
 
-import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { formatCurrency, formatPercent } from '@/lib/metrics'
 
-interface CampaignRow {
-  id: string
-  name: string
+interface AdRow {
+  ad_id: string
+  ad_name: string
+  adset_name: string | null
   spend: number
   leads: number
   cpl: number | null
@@ -16,17 +16,22 @@ interface CampaignRow {
 }
 
 interface Props {
-  campaigns: CampaignRow[]
+  ads: AdRow[]
   avgCpl: number | null
 }
 
-export function CampaignsTable({ campaigns, avgCpl }: Props) {
+export function AdBreakdownTable({ ads, avgCpl }: Props) {
+  if (ads.length === 0) {
+    return <p className="text-sm text-slate-500">Nenhum dado para o período.</p>
+  }
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-slate-500 text-left">
-            <th className="pb-3 pr-4 font-medium">Campanha</th>
+            <th className="pb-3 pr-4 font-medium">Anúncio</th>
+            <th className="pb-3 pr-4 font-medium text-slate-400">Conjunto</th>
             <th className="pb-3 pr-4 font-medium text-right">Spend</th>
             <th className="pb-3 pr-4 font-medium text-right">Leads</th>
             <th className="pb-3 pr-4 font-medium text-right">CPL</th>
@@ -35,18 +40,17 @@ export function CampaignsTable({ campaigns, avgCpl }: Props) {
           </tr>
         </thead>
         <tbody>
-          {campaigns.map(row => {
+          {ads.map(row => {
             const highCpl = avgCpl !== null && row.cpl !== null && row.cpl > avgCpl * 1.2
             const lowCtr = row.ctr !== null && row.ctr < 0.005
             return (
-              <tr key={row.id} className="border-b hover:bg-slate-50">
+              <tr key={row.ad_id} className="border-b hover:bg-slate-50">
                 <td className="py-3 pr-4 font-medium">
-                  <Link href={`/campaigns/${encodeURIComponent(row.id)}`} className="hover:underline">
-                    {row.name}
-                  </Link>
+                  {row.ad_name}
                   {highCpl && <Badge variant="destructive" className="ml-2 text-xs">CPL alto</Badge>}
                   {lowCtr && <Badge variant="outline" className="ml-2 text-xs">CTR baixo</Badge>}
                 </td>
+                <td className="py-3 pr-4 text-slate-400 text-xs">{row.adset_name ?? '—'}</td>
                 <td className="py-3 pr-4 text-right">{formatCurrency(row.spend)}</td>
                 <td className="py-3 pr-4 text-right">{row.leads}</td>
                 <td className="py-3 pr-4 text-right">{formatCurrency(row.cpl)}</td>
