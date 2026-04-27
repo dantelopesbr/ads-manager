@@ -52,7 +52,7 @@ export async function searchContactByPhone(
   }
 }
 
-export async function getMostRecentDeal(
+export async function getTotalDealValue(
   contactId: string,
   apiKey: string
 ): Promise<HubSpotDeal> {
@@ -64,15 +64,27 @@ export async function getMostRecentDeal(
 
   if (!data.results?.length) return { deal_value: null, deal_stage: null }
 
-  const dealId = data.results[data.results.length - 1].id
-  const deal = await hubspotFetch(
-    `/crm/v3/objects/deals/${dealId}?properties=amount,dealstage`,
-    { method: 'GET' },
-    apiKey
-  )
+  // Fetch all deals and sum their amounts
+  const dealIds: string[] = data.results.map((r: { id: string }) => r.id)
+  let totalValue = 0
+  let lastStage: string | null = null
+
+  for (const dealId of dealIds) {
+    const deal = await hubspotFetch(
+      `/crm/v3/objects/deals/${dealId}?properties=amount,dealstage`,
+      { method: 'GET' },
+      apiKey
+    )
+    if (deal.properties?.amount) {
+      totalValue += parseFloat(deal.properties.amount)
+    }
+    if (deal.properties?.dealstage) {
+      lastStage = deal.properties.dealstage
+    }
+  }
 
   return {
-    deal_value: deal.properties?.amount ? parseFloat(deal.properties.amount) : null,
-    deal_stage: deal.properties?.dealstage ?? null,
+    deal_value: totalValue > 0 ? totalValue : null,
+    deal_stage: lastStage,
   }
 }

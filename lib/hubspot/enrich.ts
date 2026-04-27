@@ -1,5 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js'
-import { searchContactByPhone, getMostRecentDeal } from './client'
+import { searchContactByPhone, getTotalDealValue } from './client'
 
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -56,7 +56,7 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
       const contact = await withRetry(() => searchContactByPhone(phone, apiKey))
       if (!contact) continue
 
-      const deal = await withRetry(() => getMostRecentDeal(contact.hs_contact_id, apiKey))
+      const deal = await withRetry(() => getTotalDealValue(contact.hs_contact_id, apiKey))
 
       await supabase.from('hubspot_contacts').upsert(
         { ...contact, ...deal, phone, updated_at: new Date().toISOString() },
