@@ -1,6 +1,8 @@
 const META_API_VERSION = 'v20.0'
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`
 
+// ─── Read types ──────────────────────────────────────────────────────────────
+
 export interface MetaInsightRaw {
   campaign_id: string
   campaign_name: string
@@ -14,6 +16,32 @@ export interface MetaInsightRaw {
   reach: string
   date_start: string
 }
+
+export interface MetaCampaign {
+  id: string
+  name: string
+  status: 'ACTIVE' | 'PAUSED' | 'DELETED' | 'ARCHIVED'
+  daily_budget?: string  // in account currency cents (e.g. "50000" = R$500)
+  lifetime_budget?: string
+  effective_status: string
+}
+
+// ─── Write types ─────────────────────────────────────────────────────────────
+
+export type CampaignStatus = 'ACTIVE' | 'PAUSED'
+
+export interface UpdateCampaignFields {
+  status?: CampaignStatus
+  daily_budget?: number  // in cents (multiply BRL by 100)
+  name?: string
+}
+
+export interface MetaWriteResult {
+  success: boolean
+  id: string
+}
+
+// ─── Read operations ──────────────────────────────────────────────────────────
 
 export async function fetchMetaInsights(
   accessToken: string,
@@ -45,4 +73,83 @@ export async function fetchMetaInsights(
   }
 
   return results
+}
+
+/**
+ * Fetch live campaign list from Meta API (status, budget, name).
+ * Used by the CLI and action modals to show before/after state.
+ */
+export async function fetchMetaCampaigns(
+  accessToken: string,
+  adAccountId: string
+): Promise<MetaCampaign[]> {
+  const params = new URLSearchParams({
+    fields: 'id,name,status,effective_status,daily_budget,lifetime_budget',
+    limit: '200',
+    access_token: accessToken,
+  })
+
+  const results: MetaCampaign[] = []
+  let url: string | null = `${BASE_URL}/${adAccountId}/campaigns?${params}`
+
+  while (url) {
+    const res = await fetch(url)
+    if (!res.ok) {
+      const error: unknown = await res.json()
+      throw new Error(`Meta API error: ${JSON.stringify(error)}`)
+    }
+    const json: { data?: MetaCampaign[]; paging?: { next?: string } } = await res.json()
+    results.push(...(json.data ?? []))
+    url = json.paging?.next ?? null
+  }
+
+  return results
+}
+
+// ─── Write operations ─────────────────────────────────────────────────────────
+
+/**
+ * Update a campaign on Meta.
+ * Safety: will NEVER set status to ACTIVE — that requires explicit opt-in.
+ * Returns { success, id } or throws with a descriptive message.
+ */
+export async function updateMetaCampaign(
+  accessToken: string,
+  campaignId: string,
+  fields: UpdateCampaignFields,
+  dryRun = false
+): Promise<MetaWriteResult> {
+  // Safety: block accidental activation
+  if (fields.status === 'ACTIVE') {
+    throw new Error(
+      'Activating campaigns via API is disabled for safety. Use Meta Ads Manager to activate.'
+    )
+  }
+
+  if (dryRun) {
+    return { success: true, id: campaignId }
+  }
+
+  const body = new URLSearchParams({ access_token: accessToken })
+  if (fields.status) body.append('status', fields.status)
+  if (fields.daily_budget !== undefined) body.append('daily_budget', String(fields.daily_budget))
+  if (fields.name) body.append('name', fields.name)
+
+  const res = await fetch(`${BASE_URL}/${campaignId}`, {
+    method: 'POST',  // Meta Marketing API uses POST for updates
+    body,
+  })
+
+  if (!res.ok) {
+    const error: unknown = await res.json()
+    throw new Error(`Meta API write error: ${JSON.stringify(error)}`)
+  }
+
+  const json: { success?: boolean; id?: string } = await res.json()
+
+  if (!json.success) {
+    throw new Error(`Meta API returned success=false for campaign ${campaignId}`)
+  }
+
+  return { success: true, id: campaignId }
 }
