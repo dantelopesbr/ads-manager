@@ -1,6 +1,6 @@
 const META_API_VERSION = 'v20.0'
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`
-const ALL_STATUSES = '["ACTIVE","PAUSED","DELETED","ARCHIVED"]'
+const ALL_STATUSES = '["ACTIVE","PAUSED","ARCHIVED"]'
 
 // ─── Read types ──────────────────────────────────────────────────────────────
 
