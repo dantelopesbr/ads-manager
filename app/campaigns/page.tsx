@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { Nav } from '@/components/nav'
 import { CampaignsTable } from '@/components/campaigns/campaigns-table'
+import { DateFilter } from '@/components/date-filter'
 import { calcCPL, calcCTR, calcROAS } from '@/lib/metrics'
-import { format, subDays } from 'date-fns'
+import { format } from 'date-fns'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,21 +22,32 @@ function sumDeals(
   return { projected: projected > 0 ? projected : null, real: real > 0 ? real : null }
 }
 
-export default async function CampaignsPage() {
+export default async function CampaignsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>
+}) {
   const supabase = await createClient()
-  const since = format(subDays(new Date(), 30), 'yyyy-MM-dd')
-  const until = format(new Date(), 'yyyy-MM-dd')
+  const { from, to } = await searchParams
+  const today = format(new Date(), 'yyyy-MM-dd')
+  const since = from ?? null
+  const until = to ?? today
+
+  const insightsQuery = supabase
+    .from('meta_insights')
+    .select('campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, impressions, clicks')
+    .lte('date', until)
+  if (since) insightsQuery.gte('date', since)
+
+  const conversionsQuery = supabase
+    .from('meta_ads_conversions')
+    .select('campaign_id, adset_id, ads_id, phone_client')
+    .lte('created_at', until)
+  if (since) conversionsQuery.gte('created_at', since)
 
   const [{ data: insights }, { data: rawConversions }] = await Promise.all([
-    supabase
-      .from('meta_insights')
-      .select('campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, impressions, clicks')
-      .gte('date', since)
-      .lte('date', until),
-    supabase
-      .from('meta_ads_conversions')
-      .select('campaign_id, adset_id, ads_id, phone_client')
-      .gte('created_at', since),
+    insightsQuery,
+    conversionsQuery,
   ])
 
   const phones = [...new Set((rawConversions ?? []).map(c => c.phone_client).filter(Boolean))] as string[]
@@ -48,7 +60,6 @@ export default async function CampaignsPage() {
     dealByPhone[c.phone] = { value: c.deal_value ?? 0, isWon: c.deal_stage === 'closedwon' }
   }
 
-  // Lead counts & phone sets per level
   const campaignLeads: Record<string, number> = {}
   const adsetLeads: Record<string, number> = {}
   const adLeads: Record<string, number> = {}
@@ -78,7 +89,6 @@ export default async function CampaignsPage() {
     }
   }
 
-  // Aggregate insights
   type AdAgg = { name: string; adset_name: string | null; spend: number; impressions: number; clicks: number }
   type AdsetAgg = { name: string; spend: number; impressions: number; clicks: number; ads: Record<string, AdAgg> }
   type CampAgg = { name: string; spend: number; impressions: number; clicks: number; adsets: Record<string, AdsetAgg> }
@@ -156,7 +166,10 @@ export default async function CampaignsPage() {
     <div className="flex">
       <Nav />
       <main className="flex-1 p-8">
-        <h2 className="text-2xl font-bold mb-6">Campanhas</h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold">Campanhas</h2>
+          <DateFilter from={since ?? ''} to={until} />
+        </div>
         <div className="bg-white rounded-xl border p-6">
           <CampaignsTable campaigns={campaigns} avgCpl={avgCpl} />
         </div>
