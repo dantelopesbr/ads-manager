@@ -4,6 +4,7 @@ import { CampaignsTable } from '@/components/campaigns/campaigns-table'
 import { DateFilter } from '@/components/date-filter'
 import { calcCPL, calcCTR, calcROAS } from '@/lib/metrics'
 import { format } from 'date-fns'
+import { Suspense } from 'react'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,22 +34,37 @@ export default async function CampaignsPage({
   const since = from ?? null
   const until = to ?? today
 
-  let insightsQuery = supabase
-    .from('meta_insights')
-    .select('campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, impressions, clicks')
-    .lte('date', until)
-  if (since) insightsQuery = insightsQuery.gte('date', since)
+  const PAGE = 1000
 
-  let conversionsQuery = supabase
-    .from('meta_ads_conversions')
-    .select('campaign_id, adset_id, ads_id, phone_client')
-    .lte('created_at', until)
-  if (since) conversionsQuery = conversionsQuery.gte('created_at', since)
+  type InsightRow = { campaign_id: string; campaign_name: string | null; adset_id: string; adset_name: string | null; ad_id: string; ad_name: string | null; spend: number | null; impressions: number | null; clicks: number | null }
+  const insights: InsightRow[] = []
+  for (let p = 0; ; p++) {
+    let q = supabase
+      .from('meta_insights')
+      .select('campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, impressions, clicks')
+      .lte('date', until)
+      .range(p * PAGE, (p + 1) * PAGE - 1)
+    if (since) q = q.gte('date', since)
+    const { data } = await q
+    if (!data?.length) break
+    insights.push(...data)
+    if (data.length < PAGE) break
+  }
 
-  const [{ data: insights }, { data: rawConversions }] = await Promise.all([
-    insightsQuery,
-    conversionsQuery,
-  ])
+  type ConvRow = { campaign_id: string | null; adset_id: string | null; ads_id: string | null; phone_client: string | null }
+  const rawConversions: ConvRow[] = []
+  for (let p = 0; ; p++) {
+    let q = supabase
+      .from('meta_ads_conversions')
+      .select('campaign_id, adset_id, ads_id, phone_client')
+      .lte('created_at', until)
+      .range(p * PAGE, (p + 1) * PAGE - 1)
+    if (since) q = q.gte('created_at', since)
+    const { data } = await q
+    if (!data?.length) break
+    rawConversions.push(...data)
+    if (data.length < PAGE) break
+  }
 
   // Batch .in() to avoid URL length limit (~100 phones per request)
   const phones = [...new Set((rawConversions ?? []).map(c => c.phone_client).filter(Boolean))] as string[]
@@ -176,7 +192,7 @@ export default async function CampaignsPage({
       <main className="flex-1 p-8">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold">Campanhas</h2>
-          <DateFilter from={since ?? ''} to={until} />
+          <Suspense fallback={null}><DateFilter from={since ?? ''} to={until} /></Suspense>
         </div>
         <div className="bg-white rounded-xl border p-6">
           <CampaignsTable campaigns={campaigns} avgCpl={avgCpl} />

@@ -3,6 +3,7 @@ import { Nav } from '@/components/nav'
 import { LeadsTable } from '@/components/leads/leads-table'
 import { DateFilter } from '@/components/date-filter'
 import { format } from 'date-fns'
+import { Suspense } from 'react'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,7 +62,7 @@ export default async function LeadsPage({
       <main className="flex-1 p-8">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-2xl font-bold">Leads</h2>
-          <DateFilter from={since ?? ''} to={until} />
+          <Suspense fallback={null}><DateFilter from={since ?? ''} to={until} /></Suspense>
         </div>
         <p className="text-sm text-slate-500 mb-6">{label} · {leads.length} leads</p>
         <div className="bg-white rounded-xl border p-6">
