@@ -23,15 +23,24 @@ const BATCH_LIMIT = 50
 export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
   const apiKey = process.env.HUBSPOT_API_KEY!
 
-  // All phones from conversions
-  const { data: conversions } = await supabase
-    .from('meta_ads_conversions')
-    .select('phone_client')
-    .not('phone_client', 'is', null)
+  // All phones from conversions — paginate to avoid 1000-row default cap
+  const allPhones = new Set<string>()
+  let page = 0
+  const PAGE_SIZE = 1000
+  while (true) {
+    const { data: batch } = await supabase
+      .from('meta_ads_conversions')
+      .select('phone_client')
+      .not('phone_client', 'is', null)
+      .order('created_at', { ascending: false })
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+    if (!batch?.length) break
+    for (const row of batch) allPhones.add(row.phone_client as string)
+    if (batch.length < PAGE_SIZE) break
+    page++
+  }
 
-  if (!conversions?.length) return 0
-
-  const allPhones = [...new Set(conversions.map(c => c.phone_client as string))]
+  if (allPhones.size === 0) return 0
 
   // Phones already synced recently (< RESYNC_AFTER_DAYS ago)
   const resyncCutoff = new Date()
@@ -45,7 +54,7 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
   const skipPhones = new Set((recentlySynced ?? []).map(c => c.phone))
 
   // Only process new or stale contacts, limited to BATCH_LIMIT per run
-  const toSync = allPhones.filter(p => !skipPhones.has(p)).slice(0, BATCH_LIMIT)
+  const toSync = [...allPhones].filter(p => !skipPhones.has(p)).slice(0, BATCH_LIMIT)
 
   if (toSync.length === 0) return 0
 
