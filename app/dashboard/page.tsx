@@ -2,67 +2,99 @@ import { createClient } from '@/lib/supabase/server'
 import { Nav } from '@/components/nav'
 import { KpiCard } from '@/components/dashboard/kpi-card'
 import { PerformanceChart } from '@/components/dashboard/performance-chart'
+import { DateFilter } from '@/components/date-filter'
 import { calcCPL, calcROAS, formatCurrency, formatROAS } from '@/lib/metrics'
-import { format, subDays } from 'date-fns'
+import { format } from 'date-fns'
 
 export const dynamic = 'force-dynamic'
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>
+}) {
   const supabase = await createClient()
-  const since = format(subDays(new Date(), 30), 'yyyy-MM-dd')
-  const until = format(new Date(), 'yyyy-MM-dd')
+  const { from, to } = await searchParams
+  const today = format(new Date(), 'yyyy-MM-dd')
+  const since = from ?? null
+  const until = to ?? today
 
-  const [{ data: insights }, { count: totalLeads }, { data: allDeals }, { data: wonDeals }] = await Promise.all([
-    supabase.from('meta_insights').select('spend, date').gte('date', since).lte('date', until),
-    supabase.from('meta_ads_conversions').select('*', { count: 'exact', head: true }).gte('created_at', since),
-    supabase.from('hubspot_contacts').select('deal_value').not('deal_value', 'is', null),
-    supabase.from('hubspot_contacts').select('deal_value').eq('deal_stage', 'closedwon').not('deal_value', 'is', null),
+  const insightsQuery = supabase
+    .from('meta_insights')
+    .select('spend, date')
+    .lte('date', until)
+  if (since) insightsQuery.gte('date', since)
+
+  const conversionsQuery = supabase
+    .from('meta_ads_conversions')
+    .select('phone_client, created_at')
+    .lte('created_at', until)
+  if (since) conversionsQuery.gte('created_at', since)
+
+  const [{ data: insights }, { data: conversions }] = await Promise.all([
+    insightsQuery,
+    conversionsQuery,
   ])
 
-  const totalSpend = (insights ?? []).reduce((sum, r) => sum + (r.spend ?? 0), 0)
-  const totalDealValue = (allDeals ?? []).reduce((sum, r) => sum + (r.deal_value ?? 0), 0)
-  const wonDealValue = (wonDeals ?? []).reduce((sum, r) => sum + (r.deal_value ?? 0), 0)
-  const cpl = calcCPL(totalSpend, totalLeads ?? 0)
-  const roasProjected = calcROAS(totalDealValue, totalSpend)
-  const roasReal = calcROAS(wonDealValue > 0 ? wonDealValue : null, totalSpend)
+  // ROAS: only count deals from leads generated in the selected period
+  const phones = [...new Set((conversions ?? []).map(c => c.phone_client).filter(Boolean))] as string[]
+  const { data: contacts } = phones.length > 0
+    ? await supabase.from('hubspot_contacts').select('phone, deal_value, deal_stage').in('phone', phones)
+    : { data: [] }
 
-  const byDate: Record<string, { spend: number }> = {}
-  for (const row of insights ?? []) {
-    if (!byDate[row.date]) byDate[row.date] = { spend: 0 }
-    byDate[row.date].spend += row.spend ?? 0
+  const totalSpend = (insights ?? []).reduce((sum, r) => sum + (r.spend ?? 0), 0)
+  const totalLeads = conversions?.length ?? 0
+
+  let totalDealValue = 0
+  let wonDealValue = 0
+  for (const c of contacts ?? []) {
+    if (c.deal_value) {
+      totalDealValue += c.deal_value
+      if (c.deal_stage === 'closedwon') wonDealValue += c.deal_value
+    }
   }
 
-  const { data: dailyLeads } = await supabase
-    .from('meta_ads_conversions')
-    .select('created_at')
-    .gte('created_at', since)
+  const cpl = calcCPL(totalSpend, totalLeads)
+  const roasReal = calcROAS(wonDealValue > 0 ? wonDealValue : null, totalSpend)
+  const roasProjected = calcROAS(totalDealValue > 0 ? totalDealValue : null, totalSpend)
 
-  const leadsByDate: Record<string, number> = {}
-  for (const row of dailyLeads ?? []) {
+  // Chart: spend by date
+  const byDate: Record<string, { spend: number; leads: number }> = {}
+  for (const row of insights ?? []) {
+    if (!byDate[row.date]) byDate[row.date] = { spend: 0, leads: 0 }
+    byDate[row.date].spend += row.spend ?? 0
+  }
+  for (const row of conversions ?? []) {
     const d = row.created_at.split('T')[0]
-    leadsByDate[d] = (leadsByDate[d] ?? 0) + 1
+    if (!byDate[d]) byDate[d] = { spend: 0, leads: 0 }
+    byDate[d].leads += 1
   }
 
   const chartData = Object.keys(byDate).sort().map(date => ({
     date,
     spend: Math.round(byDate[date].spend),
-    leads: leadsByDate[date] ?? 0,
+    leads: byDate[date].leads,
   }))
+
+  const periodLabel = since ? `${since} → ${until}` : `até ${until}`
 
   return (
     <div className="flex">
       <Nav />
       <main className="flex-1 p-8">
-        <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold">Dashboard</h2>
+          <DateFilter from={since ?? ''} to={until} />
+        </div>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-          <KpiCard title="Total Spend" value={formatCurrency(totalSpend)} subtitle="últimos 30 dias" />
-          <KpiCard title="Leads" value={String(totalLeads ?? 0)} subtitle="últimos 30 dias" />
+          <KpiCard title="Total Spend" value={formatCurrency(totalSpend)} subtitle={periodLabel} />
+          <KpiCard title="Leads" value={String(totalLeads)} subtitle={periodLabel} />
           <KpiCard title="CPL" value={formatCurrency(cpl)} />
           <KpiCard title="ROAS Real" value={formatROAS(roasReal)} subtitle="deals fechados (won)" />
           <KpiCard title="ROAS Projetado" value={formatROAS(roasProjected)} subtitle="todos os deals" />
         </div>
         <div className="bg-white rounded-xl border p-6">
-          <h3 className="text-sm font-semibold mb-4 text-slate-600">Leads + Spend (30 dias)</h3>
+          <h3 className="text-sm font-semibold mb-4 text-slate-600">Leads + Spend · {periodLabel}</h3>
           <PerformanceChart data={chartData} />
         </div>
       </main>
