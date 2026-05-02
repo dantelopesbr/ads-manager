@@ -19,17 +19,17 @@ export default async function DashboardPage({
   const since = from ?? null
   const until = to ?? today
 
-  const insightsQuery = supabase
+  let insightsQuery = supabase
     .from('meta_insights')
     .select('spend, date')
     .lte('date', until)
-  if (since) insightsQuery.gte('date', since)
+  if (since) insightsQuery = insightsQuery.gte('date', since)
 
-  const conversionsQuery = supabase
+  let conversionsQuery = supabase
     .from('meta_ads_conversions')
     .select('phone_client, created_at')
     .lte('created_at', until)
-  if (since) conversionsQuery.gte('created_at', since)
+  if (since) conversionsQuery = conversionsQuery.gte('created_at', since)
 
   const [{ data: insights }, { data: conversions }] = await Promise.all([
     insightsQuery,

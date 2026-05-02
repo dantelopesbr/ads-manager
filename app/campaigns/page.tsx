@@ -33,17 +33,17 @@ export default async function CampaignsPage({
   const since = from ?? null
   const until = to ?? today
 
-  const insightsQuery = supabase
+  let insightsQuery = supabase
     .from('meta_insights')
     .select('campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, impressions, clicks')
     .lte('date', until)
-  if (since) insightsQuery.gte('date', since)
+  if (since) insightsQuery = insightsQuery.gte('date', since)
 
-  const conversionsQuery = supabase
+  let conversionsQuery = supabase
     .from('meta_ads_conversions')
     .select('campaign_id, adset_id, ads_id, phone_client')
     .lte('created_at', until)
-  if (since) conversionsQuery.gte('created_at', since)
+  if (since) conversionsQuery = conversionsQuery.gte('created_at', since)
 
   const [{ data: insights }, { data: rawConversions }] = await Promise.all([
     insightsQuery,

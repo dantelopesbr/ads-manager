@@ -17,13 +17,13 @@ export default async function LeadsPage({
   const since = from ?? null
   const until = to ?? today
 
-  const conversionsQuery = supabase
+  let conversionsQuery = supabase
     .from('meta_ads_conversions')
     .select('id, phone_client, campaign_name, adset_name, ad_name, created_at')
     .lte('created_at', until)
     .order('created_at', { ascending: false })
     .limit(1000)
-  if (since) conversionsQuery.gte('created_at', since)
+  if (since) conversionsQuery = conversionsQuery.gte('created_at', since)
 
   const { data: conversions } = await conversionsQuery
 
