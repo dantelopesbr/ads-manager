@@ -17,15 +17,24 @@ export default async function LeadsPage({
   const since = from ?? null
   const until = to ?? today
 
-  let conversionsQuery = supabase
-    .from('meta_ads_conversions')
-    .select('id, phone_client, campaign_name, adset_name, ad_name, created_at')
-    .lte('created_at', until)
-    .order('created_at', { ascending: false })
-    .limit(1000)
-  if (since) conversionsQuery = conversionsQuery.gte('created_at', since)
-
-  const { data: conversions } = await conversionsQuery
+  const allConversions: { id: number; phone_client: string | null; campaign_name: string | null; adset_name: string | null; ad_name: string | null; created_at: string }[] = []
+  const PAGE_SIZE = 1000
+  let page = 0
+  while (true) {
+    let q = supabase
+      .from('meta_ads_conversions')
+      .select('id, phone_client, campaign_name, adset_name, ad_name, created_at')
+      .lte('created_at', until)
+      .order('created_at', { ascending: false })
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+    if (since) q = q.gte('created_at', since)
+    const { data: batch } = await q
+    if (!batch?.length) break
+    allConversions.push(...batch)
+    if (batch.length < PAGE_SIZE) break
+    page++
+  }
+  const conversions = allConversions
 
   const phones = [...new Set((conversions ?? []).map(c => c.phone_client).filter(Boolean))] as string[]
 
