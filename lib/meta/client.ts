@@ -106,6 +106,60 @@ export async function fetchMetaCampaigns(
   return results
 }
 
+export interface MetaAdset {
+  id: string
+  name: string
+  status: 'ACTIVE' | 'PAUSED' | 'DELETED' | 'ARCHIVED'
+  effective_status: string
+  campaign_id: string
+}
+
+export interface MetaAd {
+  id: string
+  name: string
+  status: 'ACTIVE' | 'PAUSED' | 'DELETED' | 'ARCHIVED'
+  effective_status: string
+  adset_id: string
+  campaign_id: string
+}
+
+async function fetchPaged<T>(url: string): Promise<T[]> {
+  const results: T[] = []
+  let next: string | null = url
+  while (next) {
+    const res = await fetch(next)
+    if (!res.ok) throw new Error(`Meta API error: ${JSON.stringify(await res.json())}`)
+    const json: { data?: T[]; paging?: { next?: string } } = await res.json()
+    results.push(...(json.data ?? []))
+    next = json.paging?.next ?? null
+  }
+  return results
+}
+
+export async function fetchMetaAdsets(
+  accessToken: string,
+  adAccountId: string
+): Promise<MetaAdset[]> {
+  const params = new URLSearchParams({
+    fields: 'id,name,status,effective_status,campaign_id',
+    limit: '200',
+    access_token: accessToken,
+  })
+  return fetchPaged<MetaAdset>(`${BASE_URL}/${adAccountId}/adsets?${params}`)
+}
+
+export async function fetchMetaAds(
+  accessToken: string,
+  adAccountId: string
+): Promise<MetaAd[]> {
+  const params = new URLSearchParams({
+    fields: 'id,name,status,effective_status,adset_id,campaign_id',
+    limit: '200',
+    access_token: accessToken,
+  })
+  return fetchPaged<MetaAd>(`${BASE_URL}/${adAccountId}/ads?${params}`)
+}
+
 // ─── Write operations ─────────────────────────────────────────────────────────
 
 /**

@@ -8,6 +8,7 @@ import { CampaignActionModal } from './campaign-action-modal'
 interface AdRow {
   key: string
   name: string
+  status: string | null
   spend: number
   leads: number
   cpl: number | null
@@ -20,6 +21,7 @@ interface AdRow {
 interface AdsetRow {
   key: string
   name: string
+  status: string | null
   spend: number
   leads: number
   cpl: number | null
@@ -33,6 +35,7 @@ interface AdsetRow {
 interface CampaignRow {
   id: string
   name: string
+  status: string | null
   spend: number
   leads: number
   cpl: number | null
@@ -52,6 +55,15 @@ interface ActiveModal {
   campaignId: string
   campaignName: string
   actionType: 'pause' | 'budget'
+}
+
+function StatusDot({ status }: { status: string | null }) {
+  if (!status) return null
+  const s = status.toUpperCase()
+  if (s === 'ACTIVE') return <span title="Ativo" className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1.5 flex-shrink-0" />
+  if (s === 'PAUSED') return <span title="Pausado" className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5 flex-shrink-0" />
+  if (s === 'DELETED') return <span title="Deletado" className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5 flex-shrink-0" />
+  return <span title={status} className="inline-block w-2 h-2 rounded-full bg-slate-300 mr-1.5 flex-shrink-0" />
 }
 
 function isBadCpl(cpl: number | null, avg: number | null) {
@@ -148,6 +160,7 @@ export function CampaignsTable({ campaigns, avgCpl }: Props) {
                       onClick={() => toggleCampaign(campaign.id)}
                     >
                       <span className="mr-2 text-slate-400 text-xs">{campExpanded ? '▼' : '▶'}</span>
+                      <StatusDot status={campaign.status} />
                       {campaign.name}
                       {isBadCpl(campaign.cpl, avgCpl) && <Badge variant="destructive" className="ml-2 text-xs">CPL alto</Badge>}
                       {isBadCtr(campaign.ctr) && <Badge variant="outline" className="ml-2 text-xs">CTR baixo</Badge>}
@@ -179,6 +192,7 @@ export function CampaignsTable({ campaigns, avgCpl }: Props) {
                         >
                           <td className="py-2 pr-4 pl-6 text-slate-700">
                             <span className="mr-2 text-slate-400 text-xs">{adsetExpanded ? '▼' : '▶'}</span>
+                            <StatusDot status={adset.status} />
                             {adset.name}
                             {isBadCpl(adset.cpl, avgCpl) && <Badge variant="destructive" className="ml-2 text-xs">CPL alto</Badge>}
                             {isBadCtr(adset.ctr) && <Badge variant="outline" className="ml-2 text-xs">CTR baixo</Badge>}
@@ -196,7 +210,7 @@ export function CampaignsTable({ campaigns, avgCpl }: Props) {
                         {/* Ad rows */}
                         {adsetExpanded && adset.ads.map(ad => (
                           <tr key={ad.key} className="border-b bg-slate-100">
-                            <td className="py-2 pr-4 pl-12 text-slate-600 text-xs">{ad.name}
+                            <td className="py-2 pr-4 pl-12 text-slate-600 text-xs flex items-center"><StatusDot status={ad.status} />{ad.name}
                               {isBadCpl(ad.cpl, avgCpl) && <Badge variant="destructive" className="ml-2 text-xs">CPL alto</Badge>}
                               {isBadCtr(ad.ctr) && <Badge variant="outline" className="ml-2 text-xs">CTR baixo</Badge>}
                             </td>
