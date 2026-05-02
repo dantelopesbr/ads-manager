@@ -37,10 +37,18 @@ export default async function DashboardPage({
   ])
 
   // ROAS: only count deals from leads generated in the selected period
+  // Batch .in() to avoid URL length limit (~100 phones per request)
   const phones = [...new Set((conversions ?? []).map(c => c.phone_client).filter(Boolean))] as string[]
-  const { data: contacts } = phones.length > 0
-    ? await supabase.from('hubspot_contacts').select('phone, deal_value, deal_stage').in('phone', phones)
-    : { data: [] }
+  const BATCH = 100
+  const contactRows: { phone: string; deal_value: number | null; deal_stage: string | null }[] = []
+  for (let i = 0; i < phones.length; i += BATCH) {
+    const { data } = await supabase
+      .from('hubspot_contacts')
+      .select('phone, deal_value, deal_stage')
+      .in('phone', phones.slice(i, i + BATCH))
+    if (data) contactRows.push(...data)
+  }
+  const contacts = contactRows
 
   const totalSpend = (insights ?? []).reduce((sum, r) => sum + (r.spend ?? 0), 0)
   const totalLeads = conversions?.length ?? 0

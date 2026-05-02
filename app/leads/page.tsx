@@ -36,14 +36,9 @@ export default async function LeadsPage({
   }
   const conversions = allConversions
 
-  const phones = [...new Set((conversions ?? []).map(c => c.phone_client).filter(Boolean))] as string[]
-
-  const { data: contacts } = phones.length > 0
-    ? await supabase
-        .from('hubspot_contacts')
-        .select('phone, lifecycle_stage, deal_value, deal_stage')
-        .in('phone', phones)
-    : { data: [] }
+  const { data: contacts } = await supabase
+    .from('hubspot_contacts')
+    .select('phone, lifecycle_stage, deal_value, deal_stage')
 
   const contactByPhone = Object.fromEntries(
     (contacts ?? []).map(c => [c.phone, c])
