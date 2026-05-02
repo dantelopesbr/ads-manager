@@ -61,7 +61,7 @@ function StatusDot({ status }: { status: string | null }) {
   if (!status) return null
   const s = status.toUpperCase()
   if (s === 'ACTIVE') return <span title="Ativo" className="inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1.5 flex-shrink-0" />
-  if (s === 'PAUSED') return <span title="Pausado" className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5 flex-shrink-0" />
+  if (s === 'PAUSED' || s === 'ARCHIVED') return <span title="Pausado" className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5 flex-shrink-0" />
   if (s === 'DELETED') return <span title="Deletado" className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1.5 flex-shrink-0" />
   return <span title={status} className="inline-block w-2 h-2 rounded-full bg-slate-300 mr-1.5 flex-shrink-0" />
 }
