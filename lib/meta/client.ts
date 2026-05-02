@@ -1,5 +1,6 @@
 const META_API_VERSION = 'v20.0'
 const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`
+const ALL_STATUSES = 'ACTIVE,PAUSED,DELETED,ARCHIVED'
 
 // ─── Read types ──────────────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ export async function fetchMetaCampaigns(
 ): Promise<MetaCampaign[]> {
   const params = new URLSearchParams({
     fields: 'id,name,status,effective_status,daily_budget,lifetime_budget',
+    effective_status: ALL_STATUSES,
     limit: '200',
     access_token: accessToken,
   })
@@ -142,6 +144,7 @@ export async function fetchMetaAdsets(
 ): Promise<MetaAdset[]> {
   const params = new URLSearchParams({
     fields: 'id,name,status,effective_status,campaign_id',
+    effective_status: ALL_STATUSES,
     limit: '200',
     access_token: accessToken,
   })
@@ -154,6 +157,7 @@ export async function fetchMetaAds(
 ): Promise<MetaAd[]> {
   const params = new URLSearchParams({
     fields: 'id,name,status,effective_status,adset_id,campaign_id',
+    effective_status: ALL_STATUSES,
     limit: '200',
     access_token: accessToken,
   })
