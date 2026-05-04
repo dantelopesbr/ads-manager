@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { calcCPL, calcCTR } from '@/lib/metrics'
+import { fetchMetaAccountStatus, BILLING_PROBLEM_STATUSES } from '@/lib/meta/client'
 
 export interface CampaignAlert {
   campaignId: string
@@ -10,13 +11,57 @@ export interface CampaignAlert {
   spend: number
 }
 
-export async function checkAlerts(supabase: SupabaseClient): Promise<CampaignAlert[]> {
+export interface AccountAlert {
+  type: 'pagamento_falhou' | 'saldo_insuficiente'
+  message: string
+  detail: string
+}
+
+export interface AlertResult {
+  campaignAlerts: CampaignAlert[]
+  accountAlerts: AccountAlert[]
+}
+
+// Saldo baixo = menos de R$50 (em centavos = 5000)
+const LOW_BALANCE_THRESHOLD_CENTS = 5000
+
+export async function checkAlerts(supabase: SupabaseClient): Promise<AlertResult> {
   const since = new Date()
   since.setDate(since.getDate() - 7)
   const sinceStr = since.toISOString().split('T')[0]
   const until = new Date().toISOString().split('T')[0]
 
-  // Aggregate spend/clicks/impressions per campaign for the last 7 days
+  // ── Account billing check ─────────────────────────────────────────────────
+  const accountAlerts: AccountAlert[] = []
+  try {
+    const token = process.env.META_ACCESS_TOKEN!
+    const accountId = process.env.META_AD_ACCOUNT_ID!
+    const status = await fetchMetaAccountStatus(token, accountId)
+
+    const billingProblem = BILLING_PROBLEM_STATUSES[status.account_status]
+    if (billingProblem) {
+      accountAlerts.push({
+        type: 'pagamento_falhou',
+        message: 'Problema de pagamento na conta Meta Ads',
+        detail: billingProblem,
+      })
+    }
+
+    // Saldo pré-pago baixo (balance é "0" para contas pós-pagas — ignorar)
+    const balanceCents = parseInt(status.balance, 10)
+    if (balanceCents > 0 && balanceCents < LOW_BALANCE_THRESHOLD_CENTS) {
+      const balanceBrl = (balanceCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: status.currency ?? 'BRL' })
+      accountAlerts.push({
+        type: 'saldo_insuficiente',
+        message: 'Saldo pré-pago baixo na conta Meta Ads',
+        detail: `Saldo atual: ${balanceBrl} (abaixo de R$50)`,
+      })
+    }
+  } catch {
+    // billing check failing should not block campaign alerts
+  }
+
+  // ── Campaign performance check ────────────────────────────────────────────
   const PAGE = 1000
   type InsightRow = { campaign_id: string; campaign_name: string | null; spend: number | null; clicks: number | null; impressions: number | null }
   const insights: InsightRow[] = []
@@ -51,7 +96,6 @@ export async function checkAlerts(supabase: SupabaseClient): Promise<CampaignAle
     if (c.campaign_id) leadsByCampaign[c.campaign_id] = (leadsByCampaign[c.campaign_id] ?? 0) + 1
   }
 
-  // Aggregate by campaign
   type Agg = { name: string; spend: number; clicks: number; impressions: number }
   const agg: Record<string, Agg> = {}
   for (const r of insights) {
@@ -61,35 +105,31 @@ export async function checkAlerts(supabase: SupabaseClient): Promise<CampaignAle
     agg[r.campaign_id].impressions += r.impressions ?? 0
   }
 
-  // Overall avg CPL
   const totalSpend = Object.values(agg).reduce((s, c) => s + c.spend, 0)
   const totalLeads = Object.values(leadsByCampaign).reduce((s, n) => s + n, 0)
   const avgCpl = totalLeads > 0 ? totalSpend / totalLeads : null
 
-  const alerts: CampaignAlert[] = []
+  const campaignAlerts: CampaignAlert[] = []
 
   for (const [cid, c] of Object.entries(agg)) {
-    if (c.spend < 50) continue  // ignore campaigns with very low spend
+    if (c.spend < 50) continue
 
     const leads = leadsByCampaign[cid] ?? 0
     const cpl = calcCPL(c.spend, leads)
     const ctr = calcCTR(c.clicks, c.impressions)
 
-    // CPL > avg * 1.5
     if (avgCpl !== null && cpl !== null && cpl > avgCpl * 1.5) {
-      alerts.push({ campaignId: cid, campaignName: c.name, type: 'cpl_alto', value: cpl, threshold: avgCpl * 1.5, spend: c.spend })
+      campaignAlerts.push({ campaignId: cid, campaignName: c.name, type: 'cpl_alto', value: cpl, threshold: avgCpl * 1.5, spend: c.spend })
     }
 
-    // CTR < 0.3%
     if (ctr !== null && ctr < 0.003) {
-      alerts.push({ campaignId: cid, campaignName: c.name, type: 'ctr_baixo', value: ctr, threshold: 0.003, spend: c.spend })
+      campaignAlerts.push({ campaignId: cid, campaignName: c.name, type: 'ctr_baixo', value: ctr, threshold: 0.003, spend: c.spend })
     }
 
-    // Active with spend > R$100 and 0 leads
     if (c.spend > 100 && leads === 0) {
-      alerts.push({ campaignId: cid, campaignName: c.name, type: 'sem_leads', value: null, threshold: 100, spend: c.spend })
+      campaignAlerts.push({ campaignId: cid, campaignName: c.name, type: 'sem_leads', value: null, threshold: 100, spend: c.spend })
     }
   }
 
-  return alerts
+  return { campaignAlerts, accountAlerts }
 }

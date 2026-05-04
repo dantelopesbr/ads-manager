@@ -164,6 +164,35 @@ export async function fetchMetaAds(
   return fetchPaged<MetaAd>(`${BASE_URL}/${adAccountId}/ads?${params}`)
 }
 
+// ─── Account billing ──────────────────────────────────────────────────────────
+
+export interface MetaAccountStatus {
+  account_status: number   // 1=ACTIVE 3=UNSETTLED 9=IN_GRACE_PERIOD 201=PENDING_BILLING_INFO
+  disable_reason: number
+  balance: string          // prepaid balance in account currency cents (may be "0" for postpaid)
+  currency: string
+}
+
+// account_status codes that indicate a billing problem
+export const BILLING_PROBLEM_STATUSES: Record<number, string> = {
+  3: 'Pagamento vencido (UNSETTLED)',
+  9: 'Conta em período de carência (IN_GRACE_PERIOD)',
+  201: 'Sem método de pagamento cadastrado (PENDING_BILLING_INFO)',
+}
+
+export async function fetchMetaAccountStatus(
+  accessToken: string,
+  adAccountId: string
+): Promise<MetaAccountStatus> {
+  const params = new URLSearchParams({
+    fields: 'account_status,disable_reason,balance,currency',
+    access_token: accessToken,
+  })
+  const res = await fetch(`${BASE_URL}/${adAccountId}?${params}`)
+  if (!res.ok) throw new Error(`Meta API error: ${JSON.stringify(await res.json())}`)
+  return res.json()
+}
+
 // ─── Write operations ─────────────────────────────────────────────────────────
 
 /**

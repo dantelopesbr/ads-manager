@@ -10,9 +10,10 @@ async function runAlerts() {
   const supabase = await createServiceClient()
 
   try {
-    const alerts = await checkAlerts(supabase)
+    const { campaignAlerts, accountAlerts } = await checkAlerts(supabase)
+    const total = campaignAlerts.length + accountAlerts.length
 
-    if (alerts.length === 0) {
+    if (total === 0) {
       await supabase.from('sync_logs').insert({
         type: 'alerts',
         status: 'success',
@@ -22,7 +23,7 @@ async function runAlerts() {
       return NextResponse.json({ alerts: 0 })
     }
 
-    const { subject, html } = buildAlertEmail(alerts)
+    const { subject, html } = buildAlertEmail(campaignAlerts, accountAlerts)
 
     const webhookRes = await fetch(WEBHOOK_URL, {
       method: 'POST',
@@ -31,7 +32,8 @@ async function runAlerts() {
         to: ALERT_TO,
         subject,
         html,
-        alerts,
+        campaignAlerts,
+        accountAlerts,
       }),
     })
 
@@ -39,14 +41,15 @@ async function runAlerts() {
       throw new Error(`n8n webhook error: ${webhookRes.status} ${await webhookRes.text()}`)
     }
 
+    const billingMsg = accountAlerts.length > 0 ? ` | ${accountAlerts.length} alerta(s) de pagamento` : ''
     await supabase.from('sync_logs').insert({
       type: 'alerts',
       status: 'success',
-      records_synced: alerts.length,
-      message: `${alerts.length} alerta(s) enviado(s) para ${ALERT_TO}`,
+      records_synced: total,
+      message: `${campaignAlerts.length} alerta(s) de campanha${billingMsg} enviado(s)`,
     })
 
-    return NextResponse.json({ alerts: alerts.length })
+    return NextResponse.json({ alerts: total, campaignAlerts: campaignAlerts.length, accountAlerts: accountAlerts.length })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     await supabase.from('sync_logs').insert({
