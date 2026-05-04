@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient, createClient } from '@/lib/supabase/server'
-import { Resend } from 'resend'
 import { checkAlerts } from '@/lib/alerts/check'
 import { buildAlertEmail } from '@/lib/alerts/email'
 
 const ALERT_TO = 'dante@fratellihouse.com.br'
+const WEBHOOK_URL = 'https://n8n.fratellihouse.com.br/webhook/email-alert-vercel-ads-manager'
 
 async function runAlerts() {
   const supabase = await createServiceClient()
-  const resend = new Resend(process.env.RESEND_API_KEY)
 
   try {
     const alerts = await checkAlerts(supabase)
@@ -25,12 +24,20 @@ async function runAlerts() {
 
     const { subject, html } = buildAlertEmail(alerts)
 
-    await resend.emails.send({
-      from: 'ADS Manage <alerts@resend.dev>',
-      to: ALERT_TO,
-      subject,
-      html,
+    const webhookRes = await fetch(WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: ALERT_TO,
+        subject,
+        html,
+        alerts,
+      }),
     })
+
+    if (!webhookRes.ok) {
+      throw new Error(`n8n webhook error: ${webhookRes.status} ${await webhookRes.text()}`)
+    }
 
     await supabase.from('sync_logs').insert({
       type: 'alerts',
