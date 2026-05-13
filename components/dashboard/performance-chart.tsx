@@ -32,9 +32,10 @@ export function PerformanceChart({ data }: { data: ChartPoint[] }) {
         <ResponsiveContainer width="100%" height={180}>
           <LineChart data={data}>
             <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `R$${v}`} />
+            <YAxis yAxisId="left" tick={false} axisLine={false} tickLine={false} width={40} />
+            <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v) => `R$${v}`} />
             <Tooltip formatter={(value) => [`R$${value}`, 'CPL']} />
-            <Line type="monotone" dataKey="cpl" stroke="#ef4444" name="CPL (R$)" dot={false} connectNulls={false} />
+            <Line yAxisId="right" type="monotone" dataKey="cpl" stroke="#ef4444" name="CPL (R$)" dot={false} connectNulls={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
