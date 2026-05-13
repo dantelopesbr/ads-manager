@@ -19,7 +19,8 @@ export default async function DashboardPage({
   const supabase = await createClient()
   const { from, to } = await searchParams
   const today = format(new Date(), 'yyyy-MM-dd')
-  const since = from ?? null
+  const defaultSince = format(new Date(Date.now() - 29 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd')
+  const since = from ?? defaultSince
   const until = to ?? today
 
   // Paginate insights
@@ -92,13 +93,17 @@ export default async function DashboardPage({
     byDate[d].leads += 1
   }
 
-  const chartData = Object.keys(byDate).sort().map(date => ({
-    date,
-    spend: Math.round(byDate[date].spend),
-    leads: byDate[date].leads,
-  }))
+  const chartData = Object.keys(byDate).sort().map(date => {
+    const { spend, leads } = byDate[date]
+    return {
+      date,
+      spend: Math.round(spend),
+      leads,
+      cpl: leads > 0 ? Math.round(spend / leads) : null,
+    }
+  })
 
-  const periodLabel = since ? `${since} → ${until}` : `até ${until}`
+  const periodLabel = `${since} → ${until}`
 
   return (
     <div className="flex">
