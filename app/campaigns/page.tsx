@@ -6,6 +6,7 @@ import { calcCPL, calcCTR, calcROAS } from '@/lib/metrics'
 import { fetchMetaCampaigns, fetchMetaAdsets, fetchMetaAds } from '@/lib/meta/client'
 import { format } from 'date-fns'
 import { Suspense } from 'react'
+import { getAccount, ACCOUNTS } from '@/lib/account'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,6 +36,9 @@ export default async function CampaignsPage({
   const since = from ?? null
   const until = to ?? today
 
+  const account = await getAccount()
+  const { phoneCompany } = ACCOUNTS[account]
+
   const PAGE = 1000
 
   type InsightRow = { campaign_id: string; campaign_name: string | null; adset_id: string; adset_name: string | null; ad_id: string; ad_name: string | null; spend: number | null; impressions: number | null; clicks: number | null }
@@ -43,6 +47,7 @@ export default async function CampaignsPage({
     let q = supabase
       .from('meta_insights')
       .select('campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, impressions, clicks')
+      .eq('account', account)
       .lte('date', until)
       .range(p * PAGE, (p + 1) * PAGE - 1)
     if (since) q = q.gte('date', since)
@@ -58,6 +63,7 @@ export default async function CampaignsPage({
     let q = supabase
       .from('meta_ads_conversions')
       .select('campaign_id, adset_id, ads_id, phone_client')
+      .eq('phone_company', phoneCompany)
       .lte('created_at', until)
       .range(p * PAGE, (p + 1) * PAGE - 1)
     if (since) q = q.gte('created_at', since)
@@ -86,8 +92,12 @@ export default async function CampaignsPage({
   }
 
   // Fetch live status from Meta API (best-effort — don't fail page if API down)
-  const token = process.env.META_ACCESS_TOKEN!
-  const accountId = process.env.META_AD_ACCOUNT_ID!
+  const token = account === 'fratellirev'
+    ? process.env.META_ACCESS_TOKEN_REV!
+    : process.env.META_ACCESS_TOKEN!
+  const accountId = account === 'fratellirev'
+    ? process.env.META_AD_ACCOUNT_ID_REV!
+    : process.env.META_AD_ACCOUNT_ID!
   const [metaCampaigns, metaAdsets, metaAds] = await Promise.all([
     fetchMetaCampaigns(token, accountId).catch(() => []),
     fetchMetaAdsets(token, accountId).catch(() => []),

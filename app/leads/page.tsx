@@ -4,6 +4,7 @@ import { LeadsTable } from '@/components/leads/leads-table'
 import { DateFilter } from '@/components/date-filter'
 import { format } from 'date-fns'
 import { Suspense } from 'react'
+import { getAccount, ACCOUNTS } from '@/lib/account'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,6 +19,9 @@ export default async function LeadsPage({
   const since = from ?? null
   const until = to ?? today
 
+  const account = await getAccount()
+  const { phoneCompany } = ACCOUNTS[account]
+
   const allConversions: { id: number; phone_client: string | null; campaign_name: string | null; adset_name: string | null; ad_name: string | null; created_at: string }[] = []
   const PAGE_SIZE = 1000
   let page = 0
@@ -25,6 +29,7 @@ export default async function LeadsPage({
     let q = supabase
       .from('meta_ads_conversions')
       .select('id, phone_client, campaign_name, adset_name, ad_name, created_at')
+      .eq('phone_company', phoneCompany)
       .lte('created_at', until)
       .order('created_at', { ascending: false })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)

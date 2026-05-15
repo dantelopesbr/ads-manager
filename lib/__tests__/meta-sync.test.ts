@@ -37,13 +37,13 @@ describe('syncMetaInsights', () => {
 
   it('returns count of synced records', async () => {
     const { syncMetaInsights } = await import('../meta/sync')
-    const count = await syncMetaInsights(mockSupabase as any)
+    const count = await syncMetaInsights(mockSupabase as any, 'fratellihouse', 'tok', 'act_123')
     expect(count).toBe(1)
   })
 
   it('calls upsert with correct shape', async () => {
     const { syncMetaInsights } = await import('../meta/sync')
-    await syncMetaInsights(mockSupabase as any)
+    await syncMetaInsights(mockSupabase as any, 'fratellihouse', 'tok', 'act_123')
     expect(mockUpsert).toHaveBeenCalled()
     const rows = mockUpsert.mock.calls[0][0]
     expect(rows[0]).toMatchObject({

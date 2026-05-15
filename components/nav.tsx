@@ -5,6 +5,9 @@ import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { AccountSwitcher } from './account-switcher'
+import { ACCOUNT_COOKIE, type AccountKey } from '@/lib/account'
+import { useEffect, useState } from 'react'
 
 const links = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -13,10 +16,19 @@ const links = [
   { href: '/settings', label: 'Configurações' },
 ]
 
+function getCookieAccount(): AccountKey {
+  if (typeof document === 'undefined') return 'fratellihouse'
+  const match = document.cookie.match(new RegExp(`${ACCOUNT_COOKIE}=([^;]+)`))
+  return match?.[1] === 'fratellirev' ? 'fratellirev' : 'fratellihouse'
+}
+
 export function Nav() {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
+  const [account, setAccount] = useState<AccountKey>('fratellihouse')
+
+  useEffect(() => { setAccount(getCookieAccount()) }, [])
 
   async function handleSignOut() {
     await supabase.auth.signOut()
@@ -25,7 +37,8 @@ export function Nav() {
 
   return (
     <nav className="w-56 min-h-screen bg-slate-900 text-white flex flex-col p-4 shrink-0">
-      <h1 className="text-lg font-bold mb-8">ADS Manager</h1>
+      <h1 className="text-lg font-bold mb-4">ADS Manager</h1>
+      <AccountSwitcher current={account} />
       <ul className="space-y-1 flex-1">
         {links.map(link => (
           <li key={link.href}>

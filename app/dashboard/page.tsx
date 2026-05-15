@@ -6,6 +6,7 @@ import { DateFilter } from '@/components/date-filter'
 import { calcCPL, calcROAS, formatCurrency, formatROAS } from '@/lib/metrics'
 import { format } from 'date-fns'
 import { Suspense } from 'react'
+import { getAccount, ACCOUNTS } from '@/lib/account'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,13 +24,17 @@ export default async function DashboardPage({
   const since = from ?? defaultSince
   const until = to ?? today
 
-  // Paginate insights
+  const account = await getAccount()
+  const { phoneCompany } = ACCOUNTS[account]
+
+  // Paginate insights filtered by account
   type InsightRow = { spend: number; date: string }
   const insights: InsightRow[] = []
   for (let p = 0; ; p++) {
     let q = supabase
       .from('meta_insights')
       .select('spend, date')
+      .eq('account', account)
       .lte('date', until)
       .range(p * PAGE, (p + 1) * PAGE - 1)
     if (since) q = q.gte('date', since)
@@ -39,13 +44,14 @@ export default async function DashboardPage({
     if (data.length < PAGE) break
   }
 
-  // Paginate conversions
+  // Paginate conversions filtered by phone_company
   type ConvRow = { phone_client: string | null; created_at: string }
   const conversions: ConvRow[] = []
   for (let p = 0; ; p++) {
     let q = supabase
       .from('meta_ads_conversions')
       .select('phone_client, created_at')
+      .eq('phone_company', phoneCompany)
       .lte('created_at', until)
       .range(p * PAGE, (p + 1) * PAGE - 1)
     if (since) q = q.gte('created_at', since)
@@ -55,7 +61,7 @@ export default async function DashboardPage({
     if (data.length < PAGE) break
   }
 
-  // ROAS: batch .in() 100 phones at a time to avoid URL length limit
+  // ROAS: batch .in() 100 phones at a time
   const phones = [...new Set(conversions.map(c => c.phone_client).filter(Boolean))] as string[]
   const contactRows: { phone: string; deal_value: number | null; deal_stage: string | null }[] = []
   for (let i = 0; i < phones.length; i += 100) {
@@ -81,7 +87,6 @@ export default async function DashboardPage({
   const roasReal = calcROAS(wonDealValue > 0 ? wonDealValue : null, totalSpend)
   const roasProjected = calcROAS(totalDealValue > 0 ? totalDealValue : null, totalSpend)
 
-  // Chart: spend + leads by date
   const byDate: Record<string, { spend: number; leads: number }> = {}
   for (const row of insights) {
     if (!byDate[row.date]) byDate[row.date] = { spend: 0, leads: 0 }
