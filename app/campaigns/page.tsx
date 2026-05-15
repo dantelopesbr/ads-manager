@@ -92,9 +92,9 @@ export default async function CampaignsPage({
   }
 
   // Fetch live status from Meta API (best-effort — don't fail page if API down)
-  const token = account === 'fratellirev'
-    ? process.env.META_ACCESS_TOKEN_REV!
-    : process.env.META_ACCESS_TOKEN!
+  const token = (account === 'fratellirev'
+    ? (process.env.META_ACCESS_TOKEN_REV ?? process.env.META_ACCESS_TOKEN)
+    : process.env.META_ACCESS_TOKEN)!
   const accountId = account === 'fratellirev'
     ? process.env.META_AD_ACCOUNT_ID_REV!
     : process.env.META_AD_ACCOUNT_ID!

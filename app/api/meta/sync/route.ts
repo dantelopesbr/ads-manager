@@ -13,7 +13,7 @@ async function runSync() {
     },
     {
       key: 'fratellirev' as const,
-      token: process.env.META_ACCESS_TOKEN_REV!,
+      token: (process.env.META_ACCESS_TOKEN_REV ?? process.env.META_ACCESS_TOKEN)!,
       accountId: process.env.META_AD_ACCOUNT_ID_REV!,
     },
   ]
