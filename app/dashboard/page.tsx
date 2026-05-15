@@ -6,7 +6,8 @@ import { DateFilter } from '@/components/date-filter'
 import { calcCPL, calcROAS, formatCurrency, formatROAS } from '@/lib/metrics'
 import { format } from 'date-fns'
 import { Suspense } from 'react'
-import { getAccount, ACCOUNTS } from '@/lib/account'
+import { getAccount } from '@/lib/account-server'
+import { ACCOUNTS } from '@/lib/account'
 
 export const dynamic = 'force-dynamic'
 

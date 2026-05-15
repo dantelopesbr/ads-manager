@@ -6,7 +6,8 @@ import { calcCPL, calcCTR, calcROAS } from '@/lib/metrics'
 import { fetchMetaCampaigns, fetchMetaAdsets, fetchMetaAds } from '@/lib/meta/client'
 import { format } from 'date-fns'
 import { Suspense } from 'react'
-import { getAccount, ACCOUNTS } from '@/lib/account'
+import { getAccount } from '@/lib/account-server'
+import { ACCOUNTS } from '@/lib/account'
 
 export const dynamic = 'force-dynamic'
 

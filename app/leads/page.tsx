@@ -4,7 +4,8 @@ import { LeadsTable } from '@/components/leads/leads-table'
 import { DateFilter } from '@/components/date-filter'
 import { format } from 'date-fns'
 import { Suspense } from 'react'
-import { getAccount, ACCOUNTS } from '@/lib/account'
+import { getAccount } from '@/lib/account-server'
+import { ACCOUNTS } from '@/lib/account'
 
 export const dynamic = 'force-dynamic'
 
