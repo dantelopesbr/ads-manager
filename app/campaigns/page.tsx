@@ -8,6 +8,7 @@ import { format } from 'date-fns'
 import { Suspense } from 'react'
 import { getAccount } from '@/lib/account-server'
 import { ACCOUNTS } from '@/lib/account'
+import { dedupeByClickId } from '@/lib/conversions'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,21 +59,22 @@ export default async function CampaignsPage({
     if (data.length < PAGE) break
   }
 
-  type ConvRow = { campaign_id: string | null; adset_id: string | null; ads_id: string | null; phone_client: string | null }
-  const rawConversions: ConvRow[] = []
+  type ConvRow = { campaign_id: string | null; adset_id: string | null; ads_id: string | null; phone_client: string | null; created_at: string; click_id: string | null }
+  const rawConversionsBatch: ConvRow[] = []
   for (let p = 0; ; p++) {
     let q = supabase
       .from('meta_ads_conversions')
-      .select('campaign_id, adset_id, ads_id, phone_client')
+      .select('campaign_id, adset_id, ads_id, phone_client, created_at, click_id')
       .eq('phone_company', phoneCompany)
       .lte('created_at', until)
       .range(p * PAGE, (p + 1) * PAGE - 1)
     if (since) q = q.gte('created_at', since)
     const { data } = await q
     if (!data?.length) break
-    rawConversions.push(...data)
+    rawConversionsBatch.push(...data)
     if (data.length < PAGE) break
   }
+  const rawConversions = dedupeByClickId(rawConversionsBatch)
 
   // Batch .in() to avoid URL length limit (~100 phones per request)
   const phones = [...new Set((rawConversions ?? []).map(c => c.phone_client).filter(Boolean))] as string[]

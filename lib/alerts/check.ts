@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { calcCPL, calcCTR } from '@/lib/metrics'
 import { fetchMetaAccountStatus, BILLING_PROBLEM_STATUSES } from '@/lib/meta/client'
+import { dedupeByClickId } from '@/lib/conversions'
 
 export interface CampaignAlert {
   campaignId: string
@@ -77,19 +78,20 @@ export async function checkAlerts(supabase: SupabaseClient): Promise<AlertResult
     if (data.length < PAGE) break
   }
 
-  type ConvRow = { campaign_id: string | null }
-  const conversions: ConvRow[] = []
+  type ConvRow = { campaign_id: string | null; created_at: string; click_id: string | null }
+  const rawConversions: ConvRow[] = []
   for (let p = 0; ; p++) {
     const { data } = await supabase
       .from('meta_ads_conversions')
-      .select('campaign_id')
+      .select('campaign_id, created_at, click_id')
       .gte('created_at', sinceStr)
       .lte('created_at', until)
       .range(p * PAGE, (p + 1) * PAGE - 1)
     if (!data?.length) break
-    conversions.push(...data)
+    rawConversions.push(...data)
     if (data.length < PAGE) break
   }
+  const conversions = dedupeByClickId(rawConversions)
 
   const leadsByCampaign: Record<string, number> = {}
   for (const c of conversions) {

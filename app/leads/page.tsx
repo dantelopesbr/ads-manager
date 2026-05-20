@@ -6,6 +6,7 @@ import { format } from 'date-fns'
 import { Suspense } from 'react'
 import { getAccount } from '@/lib/account-server'
 import { ACCOUNTS } from '@/lib/account'
+import { dedupeByClickId } from '@/lib/conversions'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,13 +24,13 @@ export default async function LeadsPage({
   const account = await getAccount()
   const { phoneCompany } = ACCOUNTS[account]
 
-  const allConversions: { id: number; phone_client: string | null; campaign_name: string | null; adset_name: string | null; ad_name: string | null; created_at: string }[] = []
+  const allConversions: { id: number; phone_client: string | null; campaign_name: string | null; adset_name: string | null; ad_name: string | null; created_at: string; click_id: string | null }[] = []
   const PAGE_SIZE = 1000
   let page = 0
   while (true) {
     let q = supabase
       .from('meta_ads_conversions')
-      .select('id, phone_client, campaign_name, adset_name, ad_name, created_at')
+      .select('id, phone_client, campaign_name, adset_name, ad_name, created_at, click_id')
       .eq('phone_company', phoneCompany)
       .lte('created_at', until)
       .order('created_at', { ascending: false })
@@ -41,7 +42,7 @@ export default async function LeadsPage({
     if (batch.length < PAGE_SIZE) break
     page++
   }
-  const conversions = allConversions
+  const conversions = dedupeByClickId(allConversions)
 
   const { data: contacts } = await supabase
     .from('hubspot_contacts')

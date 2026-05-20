@@ -8,6 +8,7 @@ import { format } from 'date-fns'
 import { Suspense } from 'react'
 import { getAccount } from '@/lib/account-server'
 import { ACCOUNTS } from '@/lib/account'
+import { dedupeByClickId } from '@/lib/conversions'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,21 +47,22 @@ export default async function DashboardPage({
   }
 
   // Paginate conversions filtered by phone_company
-  type ConvRow = { phone_client: string | null; created_at: string }
-  const conversions: ConvRow[] = []
+  type ConvRow = { phone_client: string | null; created_at: string; click_id: string | null }
+  const rawConversions: ConvRow[] = []
   for (let p = 0; ; p++) {
     let q = supabase
       .from('meta_ads_conversions')
-      .select('phone_client, created_at')
+      .select('phone_client, created_at, click_id')
       .eq('phone_company', phoneCompany)
       .lte('created_at', until)
       .range(p * PAGE, (p + 1) * PAGE - 1)
     if (since) q = q.gte('created_at', since)
     const { data } = await q
     if (!data?.length) break
-    conversions.push(...data)
+    rawConversions.push(...data)
     if (data.length < PAGE) break
   }
+  const conversions = dedupeByClickId(rawConversions)
 
   // ROAS: batch .in() 100 phones at a time
   const phones = [...new Set(conversions.map(c => c.phone_client).filter(Boolean))] as string[]
