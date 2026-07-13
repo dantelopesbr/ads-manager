@@ -151,3 +151,44 @@ export async function getAccountTarget(
     .maybeSingle()
   return { cpl_target: data?.cpl_target ?? null, roas_target: data?.roas_target ?? null }
 }
+
+export const DEFAULT_CPL_ALERT_MULTIPLIER = 1.5
+export const DEFAULT_CTR_ALERT_MIN = 0.003
+
+export interface AlertThresholds { cplAlertMultiplier: number; ctrAlertMin: number }
+
+export async function getAlertThresholds(
+  supabase: SupabaseClient, account: AccountKey
+): Promise<AlertThresholds> {
+  const { data } = await supabase
+    .from('account_targets')
+    .select('cpl_alert_multiplier, ctr_alert_min')
+    .eq('account', account)
+    .maybeSingle()
+  return {
+    cplAlertMultiplier: data?.cpl_alert_multiplier ?? DEFAULT_CPL_ALERT_MULTIPLIER,
+    ctrAlertMin: data?.ctr_alert_min ?? DEFAULT_CTR_ALERT_MIN,
+  }
+}
+
+export interface LeadStage { phone_client: string; deal_stage: string | null }
+
+async function getLeadStages(
+  supabase: SupabaseClient, phoneCompany: string, since: string, until: string
+): Promise<LeadStage[]> {
+  const { data, error } = await supabase.rpc('fn_dashboard_lead_stages', {
+    p_phone_company: phoneCompany, p_since: since, p_until: until,
+  })
+  if (error) throw error
+  return data ?? []
+}
+
+/** Lead stages across one or more accounts, for the dashboard funnel. */
+export async function getDashboardLeadStages(
+  supabase: SupabaseClient, accountKeys: AccountKey[], since: string, until: string
+): Promise<LeadStage[]> {
+  const perAccount = await Promise.all(
+    accountKeys.map(key => getLeadStages(supabase, ACCOUNTS[key].phoneCompany, since, until))
+  )
+  return perAccount.flat()
+}

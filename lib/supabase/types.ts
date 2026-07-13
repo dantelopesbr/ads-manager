@@ -47,6 +47,8 @@ export interface AccountTarget {
   account: string
   cpl_target: number | null
   roas_target: number | null
+  cpl_alert_multiplier: number
+  ctr_alert_min: number
   updated_at: string
 }
 

@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { formatCurrency } from '@/lib/metrics'
+import { DEAL_STAGE_MAP, STATUS_GROUPS } from '@/lib/deal-stages'
 
 interface LeadRow {
   id: number
@@ -14,24 +15,6 @@ interface LeadRow {
   lifecycle_stage: string | null
   deal_value: number | null
   deal_stage: string | null
-}
-
-const DEAL_STAGE_MAP: Record<string, { label: string; className: string }> = {
-  appointmentscheduled: { label: 'Lead',            className: 'bg-slate-100 text-slate-700 border-slate-200' },
-  qualifiedtobuy:       { label: 'Orçamento',       className: 'bg-amber-50 text-amber-700 border-amber-200' },
-  closedwon:            { label: 'Venda Realizada', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  closedlost:           { label: 'Venda Perdida',   className: 'bg-red-50 text-red-600 border-red-200' },
-  checkout_abandoned:   { label: 'Lead',            className: 'bg-slate-100 text-slate-700 border-slate-200' },
-  checkout_pending:     { label: 'Orçamento',       className: 'bg-amber-50 text-amber-700 border-amber-200' },
-  processed:            { label: 'Venda Realizada', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  cancelled:            { label: 'Venda Perdida',   className: 'bg-red-50 text-red-600 border-red-200' },
-}
-
-const STATUS_GROUPS: Record<string, string[]> = {
-  'Lead':              ['appointmentscheduled', 'checkout_abandoned'],
-  'Orçamento':         ['qualifiedtobuy', 'checkout_pending'],
-  'Venda Realizada':   ['closedwon', 'processed'],
-  'Venda Perdida':     ['closedlost', 'cancelled'],
 }
 
 function DealStageBadge({ stage }: { stage: string | null }) {

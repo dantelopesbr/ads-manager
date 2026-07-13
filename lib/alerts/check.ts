@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { calcCPL, calcCTR } from '@/lib/metrics'
 import { fetchMetaAccountStatus, BILLING_PROBLEM_STATUSES } from '@/lib/meta/client'
-import { getInsightsByAd, getConversionLeadCounts } from '@/lib/queries'
+import { getInsightsByAd, getConversionLeadCounts, getAlertThresholds } from '@/lib/queries'
 import { ACCOUNTS, type AccountKey } from '@/lib/account'
 
 export interface CampaignAlert {
@@ -66,18 +66,21 @@ export async function checkAlerts(supabase: SupabaseClient): Promise<AlertResult
   // ── Campaign performance check ────────────────────────────────────────────
   // Aggregated in Postgres (per ad, already summed) — one RPC round trip per
   // account instead of paginating the full insights/conversions tables.
+  // Thresholds are per-account (Settings → Metas por Conta), defaulting to
+  // 1.5x average CPL / 0.3% CTR when an account hasn't customized them.
   const accountKeys = Object.keys(ACCOUNTS) as AccountKey[]
 
   type Agg = { name: string; spend: number; clicks: number; impressions: number }
-  const agg: Record<string, Agg> = {}
-  const leadsByCampaign: Record<string, number> = {}
+  const campaignAlerts: CampaignAlert[] = []
 
   for (const key of accountKeys) {
-    const [insightRows, leadRows] = await Promise.all([
+    const [insightRows, leadRows, thresholds] = await Promise.all([
       getInsightsByAd(supabase, key, sinceStr, until),
       getConversionLeadCounts(supabase, ACCOUNTS[key].phoneCompany, sinceStr, until),
+      getAlertThresholds(supabase, key),
     ])
 
+    const agg: Record<string, Agg> = {}
     for (const r of insightRows) {
       if (!agg[r.campaign_id]) agg[r.campaign_id] = { name: r.campaign_name ?? r.campaign_id, spend: 0, clicks: 0, impressions: 0 }
       agg[r.campaign_id].spend += r.spend ?? 0
@@ -85,34 +88,34 @@ export async function checkAlerts(supabase: SupabaseClient): Promise<AlertResult
       agg[r.campaign_id].impressions += r.impressions ?? 0
     }
 
+    const leadsByCampaign: Record<string, number> = {}
     for (const l of leadRows) {
       leadsByCampaign[l.campaign_id] = (leadsByCampaign[l.campaign_id] ?? 0) + Number(l.leads)
     }
-  }
 
-  const totalSpend = Object.values(agg).reduce((s, c) => s + c.spend, 0)
-  const totalLeads = Object.values(leadsByCampaign).reduce((s, n) => s + n, 0)
-  const avgCpl = totalLeads > 0 ? totalSpend / totalLeads : null
+    const totalSpend = Object.values(agg).reduce((s, c) => s + c.spend, 0)
+    const totalLeads = Object.values(leadsByCampaign).reduce((s, n) => s + n, 0)
+    const avgCpl = totalLeads > 0 ? totalSpend / totalLeads : null
+    const cplThreshold = avgCpl !== null ? avgCpl * thresholds.cplAlertMultiplier : null
 
-  const campaignAlerts: CampaignAlert[] = []
+    for (const [cid, c] of Object.entries(agg)) {
+      if (c.spend < 50) continue
 
-  for (const [cid, c] of Object.entries(agg)) {
-    if (c.spend < 50) continue
+      const leads = leadsByCampaign[cid] ?? 0
+      const cpl = calcCPL(c.spend, leads)
+      const ctr = calcCTR(c.clicks, c.impressions)
 
-    const leads = leadsByCampaign[cid] ?? 0
-    const cpl = calcCPL(c.spend, leads)
-    const ctr = calcCTR(c.clicks, c.impressions)
+      if (cplThreshold !== null && cpl !== null && cpl > cplThreshold) {
+        campaignAlerts.push({ campaignId: cid, campaignName: c.name, type: 'cpl_alto', value: cpl, threshold: cplThreshold, spend: c.spend })
+      }
 
-    if (avgCpl !== null && cpl !== null && cpl > avgCpl * 1.5) {
-      campaignAlerts.push({ campaignId: cid, campaignName: c.name, type: 'cpl_alto', value: cpl, threshold: avgCpl * 1.5, spend: c.spend })
-    }
+      if (ctr !== null && ctr < thresholds.ctrAlertMin) {
+        campaignAlerts.push({ campaignId: cid, campaignName: c.name, type: 'ctr_baixo', value: ctr, threshold: thresholds.ctrAlertMin, spend: c.spend })
+      }
 
-    if (ctr !== null && ctr < 0.003) {
-      campaignAlerts.push({ campaignId: cid, campaignName: c.name, type: 'ctr_baixo', value: ctr, threshold: 0.003, spend: c.spend })
-    }
-
-    if (c.spend > 100 && leads === 0) {
-      campaignAlerts.push({ campaignId: cid, campaignName: c.name, type: 'sem_leads', value: null, threshold: 100, spend: c.spend })
+      if (c.spend > 100 && leads === 0) {
+        campaignAlerts.push({ campaignId: cid, campaignName: c.name, type: 'sem_leads', value: null, threshold: 100, spend: c.spend })
+      }
     }
   }
 

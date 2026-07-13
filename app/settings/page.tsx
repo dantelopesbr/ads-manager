@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { SyncButton } from './sync-button'
 import { TargetsForm } from '@/components/settings/targets-form'
 import { ACCOUNTS, ACCOUNT_KEYS } from '@/lib/account'
+import { DEFAULT_CPL_ALERT_MULTIPLIER, DEFAULT_CTR_ALERT_MIN } from '@/lib/queries'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +20,7 @@ export default async function SettingsPage() {
 
   const { data: targets } = await supabase
     .from('account_targets')
-    .select('account, cpl_target, roas_target')
+    .select('account, cpl_target, roas_target, cpl_alert_multiplier, ctr_alert_min')
   const targetByAccount = Object.fromEntries((targets ?? []).map(t => [t.account, t]))
 
   const lastMeta = logs?.find(l => l.type === 'meta')
@@ -69,6 +70,8 @@ export default async function SettingsPage() {
                 label={ACCOUNTS[key].label}
                 initialCplTarget={targetByAccount[key]?.cpl_target ?? null}
                 initialRoasTarget={targetByAccount[key]?.roas_target ?? null}
+                initialCplAlertMultiplier={targetByAccount[key]?.cpl_alert_multiplier ?? DEFAULT_CPL_ALERT_MULTIPLIER}
+                initialCtrAlertMin={targetByAccount[key]?.ctr_alert_min ?? DEFAULT_CTR_ALERT_MIN}
               />
             ))}
           </CardContent>

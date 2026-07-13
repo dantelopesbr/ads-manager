@@ -2,14 +2,16 @@ import { createClient } from '@/lib/supabase/server'
 import { Nav } from '@/components/nav'
 import { KpiCard } from '@/components/dashboard/kpi-card'
 import { PerformanceChart } from '@/components/dashboard/performance-chart'
+import { FunnelChart } from '@/components/dashboard/funnel-chart'
 import { DateFilter } from '@/components/date-filter'
 import { calcCPL, calcROAS, formatCurrency, formatROAS, formatPercent } from '@/lib/metrics'
+import { bucketDealStage, type FunnelBucket } from '@/lib/deal-stages'
 import { format, subDays, differenceInCalendarDays, parseISO } from 'date-fns'
 import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
 import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
 import {
-  getDashboardPeriodData, getAccountTarget,
+  getDashboardPeriodData, getAccountTarget, getDashboardLeadStages,
   type DailySpend, type DailyLeads, type DealTotals,
 } from '@/lib/queries'
 
@@ -50,11 +52,18 @@ export default async function DashboardPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [current, previous, target] = await Promise.all([
+  const [current, previous, target, leadStages] = await Promise.all([
     getDashboardPeriodData(supabase, accountKeys, since, until),
     getDashboardPeriodData(supabase, accountKeys, prevSince, prevUntil),
     selection === 'all' ? Promise.resolve({ cpl_target: null, roas_target: null }) : getAccountTarget(supabase, selection),
+    getDashboardLeadStages(supabase, accountKeys, since, until),
   ])
+
+  const funnelCounts: Partial<Record<FunnelBucket, number>> = {}
+  for (const l of leadStages) {
+    const bucket = bucketDealStage(l.deal_stage)
+    funnelCounts[bucket] = (funnelCounts[bucket] ?? 0) + 1
+  }
   const { insights, conversionsDaily, dealTotals } = current
 
   const curr = summarize(current.insights, current.conversionsDaily, current.dealTotals)
@@ -122,9 +131,13 @@ export default async function DashboardPage({
           <KpiCard title="ROAS Projetado" value={formatROAS(roasProjected)} subtitle="todos os deals" delta={roasProjectedDelta} />
         </div>
         <p className="text-xs text-slate-400 -mt-6 mb-6">vs. período anterior ({prevSince} → {prevUntil})</p>
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-xl border p-6 mb-8">
           <h3 className="text-sm font-semibold mb-4 text-slate-600">Leads + Spend · {periodLabel}</h3>
           <PerformanceChart data={chartData} />
+        </div>
+        <div className="bg-white rounded-xl border p-6">
+          <h3 className="text-sm font-semibold mb-4 text-slate-600">Funil de Vendas · {periodLabel}</h3>
+          <FunnelChart counts={funnelCounts} total={leadStages.length} />
         </div>
       </main>
     </div>
