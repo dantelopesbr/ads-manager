@@ -15,6 +15,7 @@ interface LeadRow {
   lifecycle_stage: string | null
   deal_value: number | null
   deal_stage: string | null
+  owner_name: string | null
 }
 
 function DealStageBadge({ stage }: { stage: string | null }) {
@@ -99,6 +100,7 @@ export function LeadsTable({ leads }: { leads: LeadRow[] }) {
               <th className="pb-3 pr-4 font-medium">Ad</th>
               <th className="pb-3 pr-4 font-medium">Data</th>
               <th className="pb-3 pr-4 font-medium">Status</th>
+              <th className="pb-3 pr-4 font-medium">Vendedor</th>
               <th className="pb-3 pr-4 font-medium text-right">Valor</th>
             </tr>
           </thead>
@@ -118,6 +120,9 @@ export function LeadsTable({ leads }: { leads: LeadRow[] }) {
                     : <span className="text-slate-300 text-xs">sem negócio</span>
                   }
                 </td>
+                <td className="py-3 pr-4 text-slate-500">
+                  {lead.owner_name ?? <span className="text-slate-300">—</span>}
+                </td>
                 <td className="py-3 pr-4 text-right">
                   {lead.deal_value ? formatCurrency(lead.deal_value) : <span className="text-slate-300">—</span>}
                 </td>
@@ -125,7 +130,7 @@ export function LeadsTable({ leads }: { leads: LeadRow[] }) {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-slate-400 text-sm">Nenhum lead encontrado</td>
+                <td colSpan={8} className="py-8 text-center text-slate-400 text-sm">Nenhum lead encontrado</td>
               </tr>
             )}
           </tbody>

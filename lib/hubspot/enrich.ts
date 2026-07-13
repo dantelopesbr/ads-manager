@@ -1,5 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js'
-import { searchContactByPhone, getTotalDealValue } from './client'
+import { searchContactByPhone, getTotalDealValue, fetchOwners } from './client'
 
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -49,32 +49,44 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
 
   // Existing sync status for phones we care about, batched to avoid the .in() URL length limit
   const phoneList = [...allPhones]
-  const updatedAtByPhone = new Map<string, string>()
+  type SyncStatus = { updatedAt: string; hasDealButNoOwner: boolean }
+  const statusByPhone = new Map<string, SyncStatus>()
   for (let i = 0; i < phoneList.length; i += 100) {
     const { data } = await supabase
       .from('hubspot_contacts')
-      .select('phone, updated_at')
+      .select('phone, updated_at, deal_stage, owner_name')
       .in('phone', phoneList.slice(i, i + 100))
-    for (const row of data ?? []) updatedAtByPhone.set(row.phone, row.updated_at)
+    for (const row of data ?? []) {
+      statusByPhone.set(row.phone, { updatedAt: row.updated_at, hasDealButNoOwner: !!row.deal_stage && !row.owner_name })
+    }
   }
 
   const resyncCutoff = new Date()
   resyncCutoff.setDate(resyncCutoff.getDate() - RESYNC_AFTER_DAYS)
   const resyncCutoffIso = resyncCutoff.toISOString()
 
-  // Never-synced phones (zero HubSpot data — hurts ROAS visibility most) go first;
-  // stale resyncs (already have some data, just outdated) only fill leftover budget.
+  // Never-synced phones (zero HubSpot data) go first; contacts that already have a
+  // deal but never got owner_name backfilled (added after they were last synced)
+  // go next, regardless of freshness — otherwise a new field never fills in until
+  // the routine 7-day resync happens to reach them; routine stale resyncs fill
+  // any leftover budget.
   const neverSynced: string[] = []
+  const missingOwner: string[] = []
   const stale: string[] = []
   for (const phone of phoneList) {
-    const updatedAt = updatedAtByPhone.get(phone)
-    if (!updatedAt) neverSynced.push(phone)
-    else if (updatedAt < resyncCutoffIso) stale.push(phone)
+    const status = statusByPhone.get(phone)
+    if (!status) neverSynced.push(phone)
+    else if (status.updatedAt < resyncCutoffIso) stale.push(phone)
+    else if (status.hasDealButNoOwner) missingOwner.push(phone)
   }
 
-  const toSync = [...neverSynced, ...stale].slice(0, BATCH_LIMIT)
+  const toSync = [...neverSynced, ...missingOwner, ...stale].slice(0, BATCH_LIMIT)
 
   if (toSync.length === 0) return 0
+
+  // Owners are a small, slow-changing list — fetch once per run rather than per contact.
+  const owners = await withRetry(() => fetchOwners(apiKey)).catch(() => [])
+  const ownerNameById = new Map(owners.map(o => [o.id, o.name]))
 
   let enriched = 0
   const startedAt = Date.now()
@@ -86,9 +98,10 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
       if (!contact) continue
 
       const deal = await withRetry(() => getTotalDealValue(contact.hs_contact_id, apiKey))
+      const owner_name = deal.owner_id ? ownerNameById.get(deal.owner_id) ?? null : null
 
       await supabase.from('hubspot_contacts').upsert(
-        { ...contact, ...deal, phone, updated_at: new Date().toISOString() },
+        { ...contact, ...deal, owner_name, phone, updated_at: new Date().toISOString() },
         { onConflict: 'phone' }
       )
       enriched++

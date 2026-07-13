@@ -40,6 +40,8 @@ export interface HubspotContact {
   deal_value: number | null
   deal_value_won: number | null
   deal_stage: string | null
+  owner_id: string | null
+  owner_name: string | null
   updated_at: string
 }
 

@@ -192,3 +192,30 @@ export async function getDashboardLeadStages(
   )
   return perAccount.flat()
 }
+
+export interface OwnerLeadRow {
+  owner_name: string | null
+  deal_stage: string | null
+  deal_value: number | null
+  deal_value_won: number | null
+}
+
+async function getOwnerBreakdownForAccount(
+  supabase: SupabaseClient, phoneCompany: string, since: string, until: string
+): Promise<OwnerLeadRow[]> {
+  const { data, error } = await supabase.rpc('fn_dashboard_owner_breakdown', {
+    p_phone_company: phoneCompany, p_since: since, p_until: until,
+  })
+  if (error) throw error
+  return data ?? []
+}
+
+/** Per-lead owner + deal info across one or more accounts, for the Vendedores page. */
+export async function getOwnerBreakdown(
+  supabase: SupabaseClient, accountKeys: AccountKey[], since: string, until: string
+): Promise<OwnerLeadRow[]> {
+  const perAccount = await Promise.all(
+    accountKeys.map(key => getOwnerBreakdownForAccount(supabase, ACCOUNTS[key].phoneCompany, since, until))
+  )
+  return perAccount.flat()
+}

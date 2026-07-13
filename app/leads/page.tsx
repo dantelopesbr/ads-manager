@@ -47,11 +47,11 @@ export default async function LeadsPage({
 
   const phones = [...new Set(conversions.map(c => c.phone_client).filter(Boolean))] as string[]
   const BATCH = 100
-  const contactRows: { phone: string; lifecycle_stage: string | null; deal_value: number | null; deal_stage: string | null }[] = []
+  const contactRows: { phone: string; lifecycle_stage: string | null; deal_value: number | null; deal_stage: string | null; owner_name: string | null }[] = []
   for (let i = 0; i < phones.length; i += BATCH) {
     const { data } = await supabase
       .from('hubspot_contacts')
-      .select('phone, lifecycle_stage, deal_value, deal_stage')
+      .select('phone, lifecycle_stage, deal_value, deal_stage, owner_name')
       .in('phone', phones.slice(i, i + BATCH))
     if (data) contactRows.push(...data)
   }
@@ -65,6 +65,7 @@ export default async function LeadsPage({
     lifecycle_stage: contactByPhone[c.phone_client ?? '']?.lifecycle_stage ?? null,
     deal_value: contactByPhone[c.phone_client ?? '']?.deal_value ?? null,
     deal_stage: contactByPhone[c.phone_client ?? '']?.deal_stage ?? null,
+    owner_name: contactByPhone[c.phone_client ?? '']?.owner_name ?? null,
   }))
 
   const label = since

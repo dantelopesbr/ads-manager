@@ -10,6 +10,7 @@ export interface HubSpotDeal {
   deal_value: number | null
   deal_value_won: number | null
   deal_stage: string | null
+  owner_id: string | null
 }
 
 async function hubspotFetch(path: string, options: RequestInit, apiKey: string) {
@@ -63,7 +64,7 @@ export async function getTotalDealValue(
     apiKey
   )
 
-  if (!data.results?.length) return { deal_value: null, deal_value_won: null, deal_stage: null }
+  if (!data.results?.length) return { deal_value: null, deal_value_won: null, deal_stage: null, owner_id: null }
 
   // Fetch all deals. Sum won value independently of iteration order — a
   // contact can have a closed deal AND an open one, and HubSpot's association
@@ -72,23 +73,27 @@ export async function getTotalDealValue(
   let totalValue = 0
   let wonValue = 0
   let lastStage: string | null = null
+  let lastOwnerId: string | null = null
+  let wonOwnerId: string | null = null
   let hasWon = false
 
   for (const dealId of dealIds) {
     const deal = await hubspotFetch(
-      `/crm/v3/objects/deals/${dealId}?properties=amount,dealstage`,
+      `/crm/v3/objects/deals/${dealId}?properties=amount,dealstage,hubspot_owner_id`,
       { method: 'GET' },
       apiKey
     )
     const amount = deal.properties?.amount ? parseFloat(deal.properties.amount) : 0
     const stage: string | null = deal.properties?.dealstage ?? null
+    const ownerId: string | null = deal.properties?.hubspot_owner_id ?? null
 
     totalValue += amount
     if (stage === 'closedwon') {
       wonValue += amount
       hasWon = true
+      wonOwnerId = ownerId
     }
-    if (stage) lastStage = stage
+    if (stage) { lastStage = stage; lastOwnerId = ownerId }
   }
 
   return {
@@ -96,5 +101,30 @@ export async function getTotalDealValue(
     deal_value_won: wonValue > 0 ? wonValue : null,
     // Prefer "closedwon" for display when any deal closed, even if it wasn't the last one fetched.
     deal_stage: hasWon ? 'closedwon' : lastStage,
+    // Credit the closer for a won deal; otherwise whoever owns the most recent deal.
+    owner_id: hasWon ? wonOwnerId : lastOwnerId,
   }
+}
+
+export interface HubSpotOwner {
+  id: string
+  name: string
+}
+
+/** All HubSpot owners (users), fetched once per enrich run and cached by the caller. */
+export async function fetchOwners(apiKey: string): Promise<HubSpotOwner[]> {
+  const owners: HubSpotOwner[] = []
+  let after: string | undefined
+
+  do {
+    const query = after ? `?limit=100&after=${after}` : '?limit=100'
+    const data = await hubspotFetch(`/crm/v3/owners${query}`, { method: 'GET' }, apiKey)
+    for (const o of data.results ?? []) {
+      const name = [o.firstName, o.lastName].filter(Boolean).join(' ').trim()
+      owners.push({ id: o.id, name: name || o.email || o.id })
+    }
+    after = data.paging?.next?.after
+  } while (after)
+
+  return owners
 }
