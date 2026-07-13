@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { calcCPL, calcCTR } from '@/lib/metrics'
 import { fetchMetaAccountStatus, BILLING_PROBLEM_STATUSES } from '@/lib/meta/client'
-import { dedupeByClickId } from '@/lib/conversions'
+import { getInsightsByAd, getConversionLeadCounts } from '@/lib/queries'
+import { ACCOUNTS, type AccountKey } from '@/lib/account'
 
 export interface CampaignAlert {
   campaignId: string
@@ -63,48 +64,30 @@ export async function checkAlerts(supabase: SupabaseClient): Promise<AlertResult
   }
 
   // ── Campaign performance check ────────────────────────────────────────────
-  const PAGE = 1000
-  type InsightRow = { campaign_id: string; campaign_name: string | null; spend: number | null; clicks: number | null; impressions: number | null }
-  const insights: InsightRow[] = []
-  for (let p = 0; ; p++) {
-    const { data } = await supabase
-      .from('meta_insights')
-      .select('campaign_id, campaign_name, spend, clicks, impressions')
-      .gte('date', sinceStr)
-      .lte('date', until)
-      .range(p * PAGE, (p + 1) * PAGE - 1)
-    if (!data?.length) break
-    insights.push(...data)
-    if (data.length < PAGE) break
-  }
-
-  type ConvRow = { campaign_id: string | null; created_at: string; click_id: string | null }
-  const rawConversions: ConvRow[] = []
-  for (let p = 0; ; p++) {
-    const { data } = await supabase
-      .from('meta_ads_conversions')
-      .select('campaign_id, created_at, click_id')
-      .gte('created_at', sinceStr)
-      .lte('created_at', until)
-      .range(p * PAGE, (p + 1) * PAGE - 1)
-    if (!data?.length) break
-    rawConversions.push(...data)
-    if (data.length < PAGE) break
-  }
-  const conversions = dedupeByClickId(rawConversions)
-
-  const leadsByCampaign: Record<string, number> = {}
-  for (const c of conversions) {
-    if (c.campaign_id) leadsByCampaign[c.campaign_id] = (leadsByCampaign[c.campaign_id] ?? 0) + 1
-  }
+  // Aggregated in Postgres (per ad, already summed) — one RPC round trip per
+  // account instead of paginating the full insights/conversions tables.
+  const accountKeys = Object.keys(ACCOUNTS) as AccountKey[]
 
   type Agg = { name: string; spend: number; clicks: number; impressions: number }
   const agg: Record<string, Agg> = {}
-  for (const r of insights) {
-    if (!agg[r.campaign_id]) agg[r.campaign_id] = { name: r.campaign_name ?? r.campaign_id, spend: 0, clicks: 0, impressions: 0 }
-    agg[r.campaign_id].spend += r.spend ?? 0
-    agg[r.campaign_id].clicks += r.clicks ?? 0
-    agg[r.campaign_id].impressions += r.impressions ?? 0
+  const leadsByCampaign: Record<string, number> = {}
+
+  for (const key of accountKeys) {
+    const [insightRows, leadRows] = await Promise.all([
+      getInsightsByAd(supabase, key, sinceStr, until),
+      getConversionLeadCounts(supabase, ACCOUNTS[key].phoneCompany, sinceStr, until),
+    ])
+
+    for (const r of insightRows) {
+      if (!agg[r.campaign_id]) agg[r.campaign_id] = { name: r.campaign_name ?? r.campaign_id, spend: 0, clicks: 0, impressions: 0 }
+      agg[r.campaign_id].spend += r.spend ?? 0
+      agg[r.campaign_id].clicks += r.clicks ?? 0
+      agg[r.campaign_id].impressions += r.impressions ?? 0
+    }
+
+    for (const l of leadRows) {
+      leadsByCampaign[l.campaign_id] = (leadsByCampaign[l.campaign_id] ?? 0) + Number(l.leads)
+    }
   }
 
   const totalSpend = Object.values(agg).reduce((s, c) => s + c.spend, 0)

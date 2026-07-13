@@ -8,7 +8,7 @@ import { format } from 'date-fns'
 import { Suspense } from 'react'
 import { getAccount } from '@/lib/account-server'
 import { ACCOUNTS } from '@/lib/account'
-import { dedupeByClickId } from '@/lib/conversions'
+import { getInsightsByAd, getConversionLeadCounts, getConversionPhoneTouches } from '@/lib/queries'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,61 +37,20 @@ export default async function CampaignsPage({
   const today = format(new Date(), 'yyyy-MM-dd')
   const since = from ?? null
   const until = to ?? today
+  const EPOCH = '2000-01-01' // sentinel: no lower bound set by user → all-time
 
   const account = await getAccount()
   const { phoneCompany } = ACCOUNTS[account]
 
-  const PAGE = 1000
-
-  type InsightRow = { campaign_id: string; campaign_name: string | null; adset_id: string; adset_name: string | null; ad_id: string; ad_name: string | null; spend: number | null; impressions: number | null; clicks: number | null }
-  const insights: InsightRow[] = []
-  for (let p = 0; ; p++) {
-    let q = supabase
-      .from('meta_insights')
-      .select('campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, spend, impressions, clicks')
-      .eq('account', account)
-      .lte('date', until)
-      .range(p * PAGE, (p + 1) * PAGE - 1)
-    if (since) q = q.gte('date', since)
-    const { data } = await q
-    if (!data?.length) break
-    insights.push(...data)
-    if (data.length < PAGE) break
-  }
-
-  type ConvRow = { campaign_id: string | null; adset_id: string | null; ads_id: string | null; phone_client: string | null; created_at: string; click_id: string | null }
-  const rawConversionsBatch: ConvRow[] = []
-  for (let p = 0; ; p++) {
-    let q = supabase
-      .from('meta_ads_conversions')
-      .select('campaign_id, adset_id, ads_id, phone_client, created_at, click_id')
-      .eq('phone_company', phoneCompany)
-      .lte('created_at', until)
-      .range(p * PAGE, (p + 1) * PAGE - 1)
-    if (since) q = q.gte('created_at', since)
-    const { data } = await q
-    if (!data?.length) break
-    rawConversionsBatch.push(...data)
-    if (data.length < PAGE) break
-  }
-  const rawConversions = dedupeByClickId(rawConversionsBatch)
-
-  // Batch .in() to avoid URL length limit (~100 phones per request)
-  const phones = [...new Set((rawConversions ?? []).map(c => c.phone_client).filter(Boolean))] as string[]
-  const BATCH = 100
-  const contactRows: { phone: string; deal_value: number | null; deal_stage: string | null }[] = []
-  for (let i = 0; i < phones.length; i += BATCH) {
-    const { data } = await supabase
-      .from('hubspot_contacts')
-      .select('phone, deal_value, deal_stage')
-      .in('phone', phones.slice(i, i + BATCH))
-    if (data) contactRows.push(...data)
-  }
-  const contacts = contactRows
+  const [insights, leadCounts, phoneTouches] = await Promise.all([
+    getInsightsByAd(supabase, account, since ?? EPOCH, until),
+    getConversionLeadCounts(supabase, phoneCompany, since ?? EPOCH, until),
+    getConversionPhoneTouches(supabase, phoneCompany, since ?? EPOCH, until),
+  ])
 
   const dealByPhone: Record<string, { value: number; isWon: boolean }> = {}
-  for (const c of contacts ?? []) {
-    dealByPhone[c.phone] = { value: c.deal_value ?? 0, isWon: c.deal_stage === 'closedwon' }
+  for (const t of phoneTouches) {
+    dealByPhone[t.phone_client] = { value: t.deal_value ?? 0, isWon: t.is_won }
   }
 
   // Fetch live status from Meta API (best-effort — don't fail page if API down)
@@ -123,26 +82,30 @@ export default async function CampaignsPage({
   const adsetPhones: Record<string, PhoneSet> = {}
   const adPhones: Record<string, PhoneSet> = {}
 
-  for (const c of rawConversions ?? []) {
-    if (!c.campaign_id) continue
+  for (const c of leadCounts) {
     const cid = c.campaign_id
     const asetKey = `${cid}__${c.adset_id}`
     const adKey = `${cid}__${c.adset_id}__${c.ads_id}`
-    campaignLeads[cid] = (campaignLeads[cid] ?? 0) + 1
-    adsetLeads[asetKey] = (adsetLeads[asetKey] ?? 0) + 1
-    adLeads[adKey] = (adLeads[adKey] ?? 0) + 1
-    const phone = c.phone_client
-    if (phone) {
-      if (!campaignPhones[cid]) campaignPhones[cid] = { all: new Set(), won: new Set() }
-      campaignPhones[cid].all.add(phone)
-      if (dealByPhone[phone]?.isWon) campaignPhones[cid].won.add(phone)
-      if (!adsetPhones[asetKey]) adsetPhones[asetKey] = { all: new Set(), won: new Set() }
-      adsetPhones[asetKey].all.add(phone)
-      if (dealByPhone[phone]?.isWon) adsetPhones[asetKey].won.add(phone)
-      if (!adPhones[adKey]) adPhones[adKey] = { all: new Set(), won: new Set() }
-      adPhones[adKey].all.add(phone)
-      if (dealByPhone[phone]?.isWon) adPhones[adKey].won.add(phone)
-    }
+    const n = Number(c.leads)
+    campaignLeads[cid] = (campaignLeads[cid] ?? 0) + n
+    adsetLeads[asetKey] = (adsetLeads[asetKey] ?? 0) + n
+    adLeads[adKey] = (adLeads[adKey] ?? 0) + n
+  }
+
+  for (const t of phoneTouches) {
+    const cid = t.campaign_id
+    const asetKey = `${cid}__${t.adset_id}`
+    const adKey = `${cid}__${t.adset_id}__${t.ads_id}`
+    const phone = t.phone_client
+    if (!campaignPhones[cid]) campaignPhones[cid] = { all: new Set(), won: new Set() }
+    campaignPhones[cid].all.add(phone)
+    if (t.is_won) campaignPhones[cid].won.add(phone)
+    if (!adsetPhones[asetKey]) adsetPhones[asetKey] = { all: new Set(), won: new Set() }
+    adsetPhones[asetKey].all.add(phone)
+    if (t.is_won) adsetPhones[asetKey].won.add(phone)
+    if (!adPhones[adKey]) adPhones[adKey] = { all: new Set(), won: new Set() }
+    adPhones[adKey].all.add(phone)
+    if (t.is_won) adPhones[adKey].won.add(phone)
   }
 
   type AdAgg = { id: string; name: string; adset_name: string | null; spend: number; impressions: number; clicks: number }

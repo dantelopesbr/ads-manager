@@ -19,7 +19,8 @@ vi.mock('../meta/client', () => ({
 }))
 
 const mockUpsert = vi.fn().mockResolvedValue({ error: null })
-const mockSelect = vi.fn().mockResolvedValue({ count: 5, error: null })
+const mockEq = vi.fn().mockResolvedValue({ count: 5, error: null })
+const mockSelect = vi.fn().mockReturnValue({ eq: mockEq })
 const mockFrom = vi.fn().mockReturnValue({
   select: mockSelect,
   upsert: mockUpsert,
@@ -31,7 +32,8 @@ describe('syncMetaInsights', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockFrom.mockReturnValue({ select: mockSelect, upsert: mockUpsert })
-    mockSelect.mockResolvedValue({ count: 5, error: null })
+    mockSelect.mockReturnValue({ eq: mockEq })
+    mockEq.mockResolvedValue({ count: 5, error: null })
     mockUpsert.mockResolvedValue({ error: null })
   })
 

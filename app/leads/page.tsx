@@ -44,12 +44,19 @@ export default async function LeadsPage({
   }
   const conversions = dedupeByClickId(allConversions)
 
-  const { data: contacts } = await supabase
-    .from('hubspot_contacts')
-    .select('phone, lifecycle_stage, deal_value, deal_stage')
+  const phones = [...new Set(conversions.map(c => c.phone_client).filter(Boolean))] as string[]
+  const BATCH = 100
+  const contactRows: { phone: string; lifecycle_stage: string | null; deal_value: number | null; deal_stage: string | null }[] = []
+  for (let i = 0; i < phones.length; i += BATCH) {
+    const { data } = await supabase
+      .from('hubspot_contacts')
+      .select('phone, lifecycle_stage, deal_value, deal_stage')
+      .in('phone', phones.slice(i, i + BATCH))
+    if (data) contactRows.push(...data)
+  }
 
   const contactByPhone = Object.fromEntries(
-    (contacts ?? []).map(c => [c.phone, c])
+    contactRows.map(c => [c.phone, c])
   )
 
   const leads = (conversions ?? []).map(c => ({
