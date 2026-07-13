@@ -43,6 +43,13 @@ export interface HubspotContact {
   updated_at: string
 }
 
+export interface AccountTarget {
+  account: string
+  cpl_target: number | null
+  roas_target: number | null
+  updated_at: string
+}
+
 export interface SyncLog {
   id: number
   type: 'meta' | 'hubspot'

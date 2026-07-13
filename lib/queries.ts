@@ -138,3 +138,16 @@ export async function getDashboardPeriodData(
     ),
   }
 }
+
+export interface AccountTargetValues { cpl_target: number | null; roas_target: number | null }
+
+export async function getAccountTarget(
+  supabase: SupabaseClient, account: AccountKey
+): Promise<AccountTargetValues> {
+  const { data } = await supabase
+    .from('account_targets')
+    .select('cpl_target, roas_target')
+    .eq('account', account)
+    .maybeSingle()
+  return { cpl_target: data?.cpl_target ?? null, roas_target: data?.roas_target ?? null }
+}

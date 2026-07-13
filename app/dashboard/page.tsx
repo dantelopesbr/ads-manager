@@ -9,7 +9,7 @@ import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
 import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
 import {
-  getDashboardPeriodData,
+  getDashboardPeriodData, getAccountTarget,
   type DailySpend, type DailyLeads, type DealTotals,
 } from '@/lib/queries'
 
@@ -50,9 +50,10 @@ export default async function DashboardPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [current, previous] = await Promise.all([
+  const [current, previous, target] = await Promise.all([
     getDashboardPeriodData(supabase, accountKeys, since, until),
     getDashboardPeriodData(supabase, accountKeys, prevSince, prevUntil),
+    selection === 'all' ? Promise.resolve({ cpl_target: null, roas_target: null }) : getAccountTarget(supabase, selection),
   ])
   const { insights, conversionsDaily, dealTotals } = current
 
@@ -109,9 +110,15 @@ export default async function DashboardPage({
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
           <KpiCard title="Total Spend" value={formatCurrency(totalSpend)} subtitle={periodLabel} delta={spendDelta} positiveIsGood={false} />
           <KpiCard title="Leads" value={String(totalLeads)} subtitle={periodLabel} delta={leadsDelta} />
-          <KpiCard title="CPL" value={formatCurrency(cpl)} delta={cplDelta} positiveIsGood={false} />
+          <KpiCard
+            title="CPL" value={formatCurrency(cpl)} delta={cplDelta} positiveIsGood={false}
+            target={target.cpl_target != null ? { label: formatCurrency(target.cpl_target), met: cpl !== null && cpl <= target.cpl_target } : null}
+          />
           <KpiCard title="Lead → Deal" value={formatPercent(conversionRate)} subtitle={`${dealTotals.deal_count} de ${totalLeads} leads`} delta={conversionDelta} />
-          <KpiCard title="ROAS Real" value={formatROAS(roasReal)} subtitle="deals fechados (won)" delta={roasRealDelta} />
+          <KpiCard
+            title="ROAS Real" value={formatROAS(roasReal)} subtitle="deals fechados (won)" delta={roasRealDelta}
+            target={target.roas_target != null ? { label: formatROAS(target.roas_target), met: roasReal !== null && roasReal >= target.roas_target } : null}
+          />
           <KpiCard title="ROAS Projetado" value={formatROAS(roasProjected)} subtitle="todos os deals" delta={roasProjectedDelta} />
         </div>
         <p className="text-xs text-slate-400 -mt-6 mb-6">vs. período anterior ({prevSince} → {prevUntil})</p>

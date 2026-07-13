@@ -8,6 +8,8 @@ interface KpiCardProps {
   delta?: number | null
   /** Whether a positive delta should be shown as good (green). Spend/CPL should pass false. */
   positiveIsGood?: boolean
+  /** Fixed target set in Settings (e.g. "Meta: R$ 45,00"). Omit when no target is configured. */
+  target?: { label: string; met: boolean } | null
 }
 
 function DeltaBadge({ delta, positiveIsGood = true }: { delta: number; positiveIsGood: boolean }) {
@@ -23,7 +25,7 @@ function DeltaBadge({ delta, positiveIsGood = true }: { delta: number; positiveI
   )
 }
 
-export function KpiCard({ title, value, subtitle, delta, positiveIsGood = true }: KpiCardProps) {
+export function KpiCard({ title, value, subtitle, delta, positiveIsGood = true, target }: KpiCardProps) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -37,6 +39,11 @@ export function KpiCard({ title, value, subtitle, delta, positiveIsGood = true }
           )}
         </div>
         {subtitle && <p className="text-xs text-slate-400 mt-1">{subtitle}</p>}
+        {target && (
+          <p className={`text-xs mt-1 font-medium ${target.met ? 'text-emerald-600' : 'text-amber-600'}`}>
+            {target.met ? '✓' : '✗'} Meta: {target.label}
+          </p>
+        )}
       </CardContent>
     </Card>
   )
