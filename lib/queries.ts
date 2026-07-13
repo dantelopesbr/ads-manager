@@ -27,7 +27,7 @@ export interface PhoneTouch {
   ads_id: string | null
   phone_client: string
   deal_value: number | null
-  is_won: boolean
+  deal_value_won: number | null
 }
 
 export async function getInsightsDaily(

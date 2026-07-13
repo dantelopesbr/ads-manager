@@ -8,6 +8,7 @@ export interface HubSpotContactResult {
 
 export interface HubSpotDeal {
   deal_value: number | null
+  deal_value_won: number | null
   deal_stage: string | null
 }
 
@@ -62,12 +63,16 @@ export async function getTotalDealValue(
     apiKey
   )
 
-  if (!data.results?.length) return { deal_value: null, deal_stage: null }
+  if (!data.results?.length) return { deal_value: null, deal_value_won: null, deal_stage: null }
 
-  // Fetch all deals and sum their amounts
+  // Fetch all deals. Sum won value independently of iteration order — a
+  // contact can have a closed deal AND an open one, and HubSpot's association
+  // order isn't guaranteed to put the closed one last.
   const dealIds: string[] = data.results.map((r: { id: string }) => r.id)
   let totalValue = 0
+  let wonValue = 0
   let lastStage: string | null = null
+  let hasWon = false
 
   for (const dealId of dealIds) {
     const deal = await hubspotFetch(
@@ -75,16 +80,21 @@ export async function getTotalDealValue(
       { method: 'GET' },
       apiKey
     )
-    if (deal.properties?.amount) {
-      totalValue += parseFloat(deal.properties.amount)
+    const amount = deal.properties?.amount ? parseFloat(deal.properties.amount) : 0
+    const stage: string | null = deal.properties?.dealstage ?? null
+
+    totalValue += amount
+    if (stage === 'closedwon') {
+      wonValue += amount
+      hasWon = true
     }
-    if (deal.properties?.dealstage) {
-      lastStage = deal.properties.dealstage
-    }
+    if (stage) lastStage = stage
   }
 
   return {
     deal_value: totalValue > 0 ? totalValue : null,
-    deal_stage: lastStage,
+    deal_value_won: wonValue > 0 ? wonValue : null,
+    // Prefer "closedwon" for display when any deal closed, even if it wasn't the last one fetched.
+    deal_stage: hasWon ? 'closedwon' : lastStage,
   }
 }

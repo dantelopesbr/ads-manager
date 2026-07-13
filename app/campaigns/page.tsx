@@ -12,17 +12,17 @@ import { getInsightsByAd, getConversionLeadCounts, getConversionPhoneTouches } f
 
 export const dynamic = 'force-dynamic'
 
-interface PhoneSet { all: Set<string>; won: Set<string> }
+interface PhoneSet { all: Set<string> }
 
 function sumDeals(
   ps: PhoneSet | undefined,
-  dealByPhone: Record<string, { value: number; isWon: boolean }>
+  dealByPhone: Record<string, { value: number; wonValue: number }>
 ) {
   if (!ps) return { projected: null, real: null }
   let projected = 0, real = 0
   for (const phone of ps.all) {
     const d = dealByPhone[phone]
-    if (d) { projected += d.value; if (d.isWon) real += d.value }
+    if (d) { projected += d.value; real += d.wonValue }
   }
   return { projected: projected > 0 ? projected : null, real: real > 0 ? real : null }
 }
@@ -49,9 +49,9 @@ export default async function CampaignsPage({
     getConversionPhoneTouches(supabase, phoneCompany, since ?? EPOCH, until),
   ])
 
-  const dealByPhone: Record<string, { value: number; isWon: boolean }> = {}
+  const dealByPhone: Record<string, { value: number; wonValue: number }> = {}
   for (const t of phoneTouches) {
-    dealByPhone[t.phone_client] = { value: t.deal_value ?? 0, isWon: t.is_won }
+    dealByPhone[t.phone_client] = { value: t.deal_value ?? 0, wonValue: t.deal_value_won ?? 0 }
   }
 
   // Fetch live status from Meta API (best-effort — don't fail page if API down)
@@ -98,15 +98,12 @@ export default async function CampaignsPage({
     const asetKey = `${cid}__${t.adset_id}`
     const adKey = `${cid}__${t.adset_id}__${t.ads_id}`
     const phone = t.phone_client
-    if (!campaignPhones[cid]) campaignPhones[cid] = { all: new Set(), won: new Set() }
+    if (!campaignPhones[cid]) campaignPhones[cid] = { all: new Set() }
     campaignPhones[cid].all.add(phone)
-    if (t.is_won) campaignPhones[cid].won.add(phone)
-    if (!adsetPhones[asetKey]) adsetPhones[asetKey] = { all: new Set(), won: new Set() }
+    if (!adsetPhones[asetKey]) adsetPhones[asetKey] = { all: new Set() }
     adsetPhones[asetKey].all.add(phone)
-    if (t.is_won) adsetPhones[asetKey].won.add(phone)
-    if (!adPhones[adKey]) adPhones[adKey] = { all: new Set(), won: new Set() }
+    if (!adPhones[adKey]) adPhones[adKey] = { all: new Set() }
     adPhones[adKey].all.add(phone)
-    if (t.is_won) adPhones[adKey].won.add(phone)
   }
 
   type AdAgg = { id: string; name: string; adset_name: string | null; spend: number; impressions: number; clicks: number }

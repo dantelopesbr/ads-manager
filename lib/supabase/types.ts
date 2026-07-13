@@ -38,6 +38,7 @@ export interface HubspotContact {
   hs_contact_id: string | null
   lifecycle_stage: string | null
   deal_value: number | null
+  deal_value_won: number | null
   deal_stage: string | null
   updated_at: string
 }
