@@ -4,6 +4,7 @@ import { AdBreakdownTable } from '@/components/campaigns/ad-breakdown-table'
 import { calcCPL, calcCTR } from '@/lib/metrics'
 import { format, subDays } from 'date-fns'
 import Link from 'next/link'
+import { dedupeByClickId } from '@/lib/conversions'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,15 +27,17 @@ export default async function CampaignDetailPage({ params }: Props) {
       .lte('date', until),
     supabase
       .from('meta_ads_conversions')
-      .select('ads_id, ad_name')
+      .select('ads_id, ad_name, created_at, click_id')
       .eq('campaign_id', campaignId)
       .gte('created_at', since),
   ])
 
   // Count leads by ad_id (ads_id in conversions = ad_id in insights)
+  // Deduped by click_id — a recategorized lead inserts a new row with the same click_id.
+  const dedupedConversions = dedupeByClickId(conversions ?? [])
   const leadsByAdId: Record<string, number> = {}
   const leadsByAdName: Record<string, number> = {}
-  for (const c of conversions ?? []) {
+  for (const c of dedupedConversions) {
     if (c.ads_id) leadsByAdId[c.ads_id] = (leadsByAdId[c.ads_id] ?? 0) + 1
     if (c.ad_name) leadsByAdName[c.ad_name] = (leadsByAdName[c.ad_name] ?? 0) + 1
   }
