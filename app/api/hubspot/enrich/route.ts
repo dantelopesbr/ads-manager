@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient, createClient } from '@/lib/supabase/server'
 import { enrichLeads } from '@/lib/hubspot/enrich'
 
+// Hobby plan cap — batch size + in-loop time budget in enrichLeads() stay under this.
+export const maxDuration = 60
+
 async function runEnrich() {
   const supabase = await createServiceClient()
   try {

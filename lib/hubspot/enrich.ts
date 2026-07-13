@@ -18,7 +18,12 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
 }
 
 const RESYNC_AFTER_DAYS = 7
-const BATCH_LIMIT = 50
+const BATCH_LIMIT = 150
+// Vercel Hobby cron can only run once a day, so a bigger batch matters more than
+// before — but the route's maxDuration is capped at 60s. Stop with margin to spare
+// rather than risk a hard timeout mid-run; whatever's left picks up next run,
+// still prioritized (never-synced phones first).
+const TIME_BUDGET_MS = 50_000
 
 export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
   const apiKey = process.env.HUBSPOT_API_KEY!
@@ -42,25 +47,40 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
 
   if (allPhones.size === 0) return 0
 
-  // Phones already synced recently (< RESYNC_AFTER_DAYS ago)
+  // Existing sync status for phones we care about, batched to avoid the .in() URL length limit
+  const phoneList = [...allPhones]
+  const updatedAtByPhone = new Map<string, string>()
+  for (let i = 0; i < phoneList.length; i += 100) {
+    const { data } = await supabase
+      .from('hubspot_contacts')
+      .select('phone, updated_at')
+      .in('phone', phoneList.slice(i, i + 100))
+    for (const row of data ?? []) updatedAtByPhone.set(row.phone, row.updated_at)
+  }
+
   const resyncCutoff = new Date()
   resyncCutoff.setDate(resyncCutoff.getDate() - RESYNC_AFTER_DAYS)
+  const resyncCutoffIso = resyncCutoff.toISOString()
 
-  const { data: recentlySynced } = await supabase
-    .from('hubspot_contacts')
-    .select('phone')
-    .gte('updated_at', resyncCutoff.toISOString())
+  // Never-synced phones (zero HubSpot data — hurts ROAS visibility most) go first;
+  // stale resyncs (already have some data, just outdated) only fill leftover budget.
+  const neverSynced: string[] = []
+  const stale: string[] = []
+  for (const phone of phoneList) {
+    const updatedAt = updatedAtByPhone.get(phone)
+    if (!updatedAt) neverSynced.push(phone)
+    else if (updatedAt < resyncCutoffIso) stale.push(phone)
+  }
 
-  const skipPhones = new Set((recentlySynced ?? []).map(c => c.phone))
-
-  // Only process new or stale contacts, limited to BATCH_LIMIT per run
-  const toSync = [...allPhones].filter(p => !skipPhones.has(p)).slice(0, BATCH_LIMIT)
+  const toSync = [...neverSynced, ...stale].slice(0, BATCH_LIMIT)
 
   if (toSync.length === 0) return 0
 
   let enriched = 0
+  const startedAt = Date.now()
 
   for (const phone of toSync) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS) break
     try {
       const contact = await withRetry(() => searchContactByPhone(phone, apiKey))
       if (!contact) continue
