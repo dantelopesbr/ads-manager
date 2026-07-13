@@ -219,3 +219,37 @@ export async function getOwnerBreakdown(
   )
   return perAccount.flat()
 }
+
+/**
+ * Message source strings only, for the Vendedores page's message-count KPI.
+ * Only Fratelli House has this table — there's no FratelliRev equivalent yet.
+ */
+export interface WhatsappMessageRow { phone: string | null; phone_fratelli: string | null; source: string | null; created_at: string }
+
+export async function getWhatsappMessages(
+  supabase: SupabaseClient, since: string, until: string
+): Promise<WhatsappMessageRow[]> {
+  const rows: WhatsappMessageRow[] = []
+  const PAGE = 1000
+  for (let page = 0; ; page++) {
+    const { data, error } = await supabase
+      .from('[FH]conversation_Whatsapp')
+      .select('phone, phone_fratelli, source, created_at')
+      .gte('created_at', since)
+      .lte('created_at', `${until}T23:59:59`)
+      .range(page * PAGE, (page + 1) * PAGE - 1)
+    if (error) throw error
+    if (!data?.length) break
+    rows.push(...data)
+    if (data.length < PAGE) break
+  }
+  return rows
+}
+
+export interface TeamPhone { phone: string; name: string }
+
+export async function getTeamPhones(supabase: SupabaseClient): Promise<TeamPhone[]> {
+  const { data, error } = await supabase.from('phones_team_fratelli').select('phone, name')
+  if (error) throw error
+  return data ?? []
+}

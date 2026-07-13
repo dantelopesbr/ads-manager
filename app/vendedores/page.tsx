@@ -6,7 +6,9 @@ import { format, subDays } from 'date-fns'
 import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
 import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
-import { getOwnerBreakdown } from '@/lib/queries'
+import { getOwnerBreakdown, getWhatsappMessages, getTeamPhones } from '@/lib/queries'
+import { classifyMessage, buildTeamPhoneIndex, normalizePhoneSuffix, KNOWN_VENDORS, IA_VENDORS } from '@/lib/whatsapp-team'
+import { MessagesChart } from '@/components/vendedores/messages-chart'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +29,34 @@ export default async function VendedoresPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const rows = await getOwnerBreakdown(supabase, accountKeys, since, until)
+  const [rows, messages, teamPhones] = await Promise.all([
+    getOwnerBreakdown(supabase, accountKeys, since, until),
+    getWhatsappMessages(supabase, since, until),
+    getTeamPhones(supabase),
+  ])
+
+  const teamIndex = buildTeamPhoneIndex(teamPhones)
+  const contactsByVendor: Record<string, Set<string>> = {}
+  const messageCountByVendor: Record<string, number> = {}
+  const dailyByVendor: Record<string, Record<string, number>> = {}
+  for (const m of messages) {
+    const teamLabel = teamIndex.get(normalizePhoneSuffix(m.phone_fratelli) ?? '') ?? null
+    const classified = classifyMessage(m.source, teamLabel)
+    const bucket = classified.vendor ?? null
+    if (!bucket) continue
+    if (!contactsByVendor[bucket]) contactsByVendor[bucket] = new Set()
+    if (m.phone) contactsByVendor[bucket].add(m.phone)
+    messageCountByVendor[bucket] = (messageCountByVendor[bucket] ?? 0) + 1
+
+    const day = m.created_at.split('T')[0]
+    if (!dailyByVendor[day]) dailyByVendor[day] = {}
+    dailyByVendor[day][bucket] = (dailyByVendor[day][bucket] ?? 0) + 1
+  }
+  const messageRows = [...KNOWN_VENDORS, ...IA_VENDORS]
+    .map(name => ({ name, contacts: contactsByVendor[name]?.size ?? 0, messages: messageCountByVendor[name] ?? 0 }))
+    .sort((a, b) => b.contacts - a.contacts)
+  const messagesChartVendors = [...KNOWN_VENDORS, ...IA_VENDORS].filter(v => messageCountByVendor[v] > 0)
+  const messagesChartData = Object.keys(dailyByVendor).sort().map(day => ({ date: day, ...dailyByVendor[day] }))
 
   type OwnerAgg = { leads: number; deals: number; won: number; valueProjected: number; valueWon: number }
   const byOwner: Record<string, OwnerAgg> = {}
@@ -106,6 +135,36 @@ export default async function VendedoresPage({
             </table>
           </div>
         </div>
+
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">WhatsApp · {periodLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">Disponível apenas para Fratelli House — FratelliRev ainda não tem esse dado. Vendedor identificado pelo número que atendeu a conversa (não pelo texto da mensagem).</p>
+        <div className="bg-white rounded-xl border p-6 max-w-md">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-slate-500 text-left">
+                <th className="pb-3 pr-4 font-medium">Vendedor</th>
+                <th className="pb-3 pr-4 font-medium text-right">Contatos</th>
+                <th className="pb-3 font-medium text-right">Mensagens</th>
+              </tr>
+            </thead>
+            <tbody>
+              {messageRows.map(m => (
+                <tr key={m.name} className="border-b last:border-0 hover:bg-slate-50">
+                  <td className={`py-2.5 pr-4 ${(IA_VENDORS as readonly string[]).includes(m.name) ? 'text-slate-400' : 'font-medium'}`}>{m.name}</td>
+                  <td className="py-2.5 pr-4 text-right">{m.contacts}</td>
+                  <td className="py-2.5 text-right text-slate-500">{m.messages}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {messagesChartData.length > 0 && (
+          <div className="bg-white rounded-xl border p-6 mt-6">
+            <h4 className="text-sm font-semibold mb-4 text-slate-600">Mensagens por dia</h4>
+            <MessagesChart data={messagesChartData} vendors={messagesChartVendors} />
+          </div>
+        )}
       </main>
     </div>
   )
