@@ -4,16 +4,38 @@ interface KpiCardProps {
   title: string
   value: string
   subtitle?: string
+  /** Percent change vs. the previous period (e.g. 12.5 = +12.5%). Omit when there's no prior-period baseline. */
+  delta?: number | null
+  /** Whether a positive delta should be shown as good (green). Spend/CPL should pass false. */
+  positiveIsGood?: boolean
 }
 
-export function KpiCard({ title, value, subtitle }: KpiCardProps) {
+function DeltaBadge({ delta, positiveIsGood = true }: { delta: number; positiveIsGood: boolean }) {
+  const isFlat = Math.abs(delta) < 0.05
+  const isUp = delta > 0
+  const isGood = isFlat ? null : isUp === positiveIsGood
+  const color = isFlat ? 'text-slate-400' : isGood ? 'text-emerald-600' : 'text-red-600'
+  const arrow = isFlat ? '–' : isUp ? '▲' : '▼'
+  return (
+    <span className={`text-xs font-medium ${color}`}>
+      {arrow} {Math.abs(delta).toFixed(1)}%
+    </span>
+  )
+}
+
+export function KpiCard({ title, value, subtitle, delta, positiveIsGood = true }: KpiCardProps) {
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium text-slate-500">{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-bold">{value}</p>
+        <div className="flex items-baseline gap-2">
+          <p className="text-2xl font-bold">{value}</p>
+          {delta !== null && delta !== undefined && (
+            <DeltaBadge delta={delta} positiveIsGood={positiveIsGood} />
+          )}
+        </div>
         {subtitle && <p className="text-xs text-slate-400 mt-1">{subtitle}</p>}
       </CardContent>
     </Card>

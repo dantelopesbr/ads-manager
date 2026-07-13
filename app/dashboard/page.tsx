@@ -3,14 +3,32 @@ import { Nav } from '@/components/nav'
 import { KpiCard } from '@/components/dashboard/kpi-card'
 import { PerformanceChart } from '@/components/dashboard/performance-chart'
 import { DateFilter } from '@/components/date-filter'
-import { calcCPL, calcROAS, formatCurrency, formatROAS } from '@/lib/metrics'
-import { format, subDays } from 'date-fns'
+import { calcCPL, calcROAS, formatCurrency, formatROAS, formatPercent } from '@/lib/metrics'
+import { format, subDays, differenceInCalendarDays, parseISO } from 'date-fns'
 import { Suspense } from 'react'
 import { getAccount } from '@/lib/account-server'
 import { ACCOUNTS } from '@/lib/account'
-import { getInsightsDaily, getConversionsDaily, getDashboardDealTotals } from '@/lib/queries'
+import {
+  getInsightsDaily, getConversionsDaily, getDashboardDealTotals,
+  type DailySpend, type DailyLeads, type DealTotals,
+} from '@/lib/queries'
 
 export const dynamic = 'force-dynamic'
+
+function summarize(insights: DailySpend[], conversionsDaily: DailyLeads[], dealTotals: DealTotals) {
+  const totalSpend = insights.reduce((s, r) => s + (r.spend ?? 0), 0)
+  const totalLeads = conversionsDaily.reduce((s, r) => s + Number(r.leads), 0)
+  const cpl = calcCPL(totalSpend, totalLeads)
+  const roasReal = calcROAS(dealTotals.won_deal_value > 0 ? dealTotals.won_deal_value : null, totalSpend)
+  const roasProjected = calcROAS(dealTotals.total_deal_value > 0 ? dealTotals.total_deal_value : null, totalSpend)
+  const conversionRate = totalLeads > 0 ? dealTotals.deal_count / totalLeads : null
+  return { totalSpend, totalLeads, cpl, roasReal, roasProjected, conversionRate }
+}
+
+function calcDelta(curr: number | null, prev: number | null): number | null {
+  if (curr === null || prev === null || prev === 0) return null
+  return ((curr - prev) / prev) * 100
+}
 
 export default async function DashboardPage({
   searchParams,
@@ -24,21 +42,33 @@ export default async function DashboardPage({
   const since = from ?? defaultSince
   const until = to ?? today
 
+  // Previous period: same length, immediately preceding `since`.
+  const periodDays = differenceInCalendarDays(parseISO(until), parseISO(since)) + 1
+  const prevUntil = format(subDays(parseISO(since), 1), 'yyyy-MM-dd')
+  const prevSince = format(subDays(parseISO(prevUntil), periodDays - 1), 'yyyy-MM-dd')
+
   const account = await getAccount()
   const { phoneCompany } = ACCOUNTS[account]
 
-  const [insights, conversionsDaily, dealTotals] = await Promise.all([
+  const [insights, conversionsDaily, dealTotals, prevInsights, prevConversionsDaily, prevDealTotals] = await Promise.all([
     getInsightsDaily(supabase, account, since, until),
     getConversionsDaily(supabase, phoneCompany, since, until),
     getDashboardDealTotals(supabase, phoneCompany, since, until),
+    getInsightsDaily(supabase, account, prevSince, prevUntil),
+    getConversionsDaily(supabase, phoneCompany, prevSince, prevUntil),
+    getDashboardDealTotals(supabase, phoneCompany, prevSince, prevUntil),
   ])
 
-  const totalSpend = insights.reduce((s, r) => s + (r.spend ?? 0), 0)
-  const totalLeads = conversionsDaily.reduce((s, r) => s + Number(r.leads), 0)
+  const curr = summarize(insights, conversionsDaily, dealTotals)
+  const prev = summarize(prevInsights, prevConversionsDaily, prevDealTotals)
+  const { totalSpend, totalLeads, cpl, roasReal, roasProjected, conversionRate } = curr
 
-  const cpl = calcCPL(totalSpend, totalLeads)
-  const roasReal = calcROAS(dealTotals.won_deal_value > 0 ? dealTotals.won_deal_value : null, totalSpend)
-  const roasProjected = calcROAS(dealTotals.total_deal_value > 0 ? dealTotals.total_deal_value : null, totalSpend)
+  const spendDelta = calcDelta(curr.totalSpend, prev.totalSpend)
+  const leadsDelta = calcDelta(curr.totalLeads, prev.totalLeads)
+  const cplDelta = calcDelta(curr.cpl, prev.cpl)
+  const roasRealDelta = calcDelta(curr.roasReal, prev.roasReal)
+  const roasProjectedDelta = calcDelta(curr.roasProjected, prev.roasProjected)
+  const conversionDelta = calcDelta(curr.conversionRate, prev.conversionRate)
 
   const byDate: Record<string, { spend: number; leads: number }> = {}
   for (const row of insights) {
@@ -72,13 +102,15 @@ export default async function DashboardPage({
             <DateFilter from={since ?? ''} to={until} />
           </Suspense>
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-          <KpiCard title="Total Spend" value={formatCurrency(totalSpend)} subtitle={periodLabel} />
-          <KpiCard title="Leads" value={String(totalLeads)} subtitle={periodLabel} />
-          <KpiCard title="CPL" value={formatCurrency(cpl)} />
-          <KpiCard title="ROAS Real" value={formatROAS(roasReal)} subtitle="deals fechados (won)" />
-          <KpiCard title="ROAS Projetado" value={formatROAS(roasProjected)} subtitle="todos os deals" />
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
+          <KpiCard title="Total Spend" value={formatCurrency(totalSpend)} subtitle={periodLabel} delta={spendDelta} positiveIsGood={false} />
+          <KpiCard title="Leads" value={String(totalLeads)} subtitle={periodLabel} delta={leadsDelta} />
+          <KpiCard title="CPL" value={formatCurrency(cpl)} delta={cplDelta} positiveIsGood={false} />
+          <KpiCard title="Lead → Deal" value={formatPercent(conversionRate)} subtitle={`${dealTotals.deal_count} de ${totalLeads} leads`} delta={conversionDelta} />
+          <KpiCard title="ROAS Real" value={formatROAS(roasReal)} subtitle="deals fechados (won)" delta={roasRealDelta} />
+          <KpiCard title="ROAS Projetado" value={formatROAS(roasProjected)} subtitle="todos os deals" delta={roasProjectedDelta} />
         </div>
+        <p className="text-xs text-slate-400 -mt-6 mb-6">vs. período anterior ({prevSince} → {prevUntil})</p>
         <div className="bg-white rounded-xl border p-6">
           <h3 className="text-sm font-semibold mb-4 text-slate-600">Leads + Spend · {periodLabel}</h3>
           <PerformanceChart data={chartData} />

@@ -2,7 +2,7 @@ import { SupabaseClient } from '@supabase/supabase-js'
 
 export interface DailySpend { date: string; spend: number }
 export interface DailyLeads { day: string; leads: number }
-export interface DealTotals { total_deal_value: number; won_deal_value: number }
+export interface DealTotals { total_deal_value: number; won_deal_value: number; deal_count: number; won_count: number }
 export interface AdInsightRow {
   campaign_id: string
   campaign_name: string | null
@@ -56,7 +56,13 @@ export async function getDashboardDealTotals(
     p_phone_company: phoneCompany, p_since: since, p_until: until,
   })
   if (error) throw error
-  return data?.[0] ?? { total_deal_value: 0, won_deal_value: 0 }
+  const row = data?.[0]
+  return {
+    total_deal_value: row?.total_deal_value ?? 0,
+    won_deal_value: row?.won_deal_value ?? 0,
+    deal_count: Number(row?.deal_count ?? 0),
+    won_count: Number(row?.won_count ?? 0),
+  }
 }
 
 export async function getInsightsByAd(
