@@ -6,10 +6,10 @@ import { DateFilter } from '@/components/date-filter'
 import { calcCPL, calcROAS, formatCurrency, formatROAS, formatPercent } from '@/lib/metrics'
 import { format, subDays, differenceInCalendarDays, parseISO } from 'date-fns'
 import { Suspense } from 'react'
-import { getAccount } from '@/lib/account-server'
-import { ACCOUNTS } from '@/lib/account'
+import { getAccountSelection } from '@/lib/account-server'
+import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
 import {
-  getInsightsDaily, getConversionsDaily, getDashboardDealTotals,
+  getDashboardPeriodData,
   type DailySpend, type DailyLeads, type DealTotals,
 } from '@/lib/queries'
 
@@ -47,20 +47,17 @@ export default async function DashboardPage({
   const prevUntil = format(subDays(parseISO(since), 1), 'yyyy-MM-dd')
   const prevSince = format(subDays(parseISO(prevUntil), periodDays - 1), 'yyyy-MM-dd')
 
-  const account = await getAccount()
-  const { phoneCompany } = ACCOUNTS[account]
+  const selection = await getAccountSelection()
+  const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [insights, conversionsDaily, dealTotals, prevInsights, prevConversionsDaily, prevDealTotals] = await Promise.all([
-    getInsightsDaily(supabase, account, since, until),
-    getConversionsDaily(supabase, phoneCompany, since, until),
-    getDashboardDealTotals(supabase, phoneCompany, since, until),
-    getInsightsDaily(supabase, account, prevSince, prevUntil),
-    getConversionsDaily(supabase, phoneCompany, prevSince, prevUntil),
-    getDashboardDealTotals(supabase, phoneCompany, prevSince, prevUntil),
+  const [current, previous] = await Promise.all([
+    getDashboardPeriodData(supabase, accountKeys, since, until),
+    getDashboardPeriodData(supabase, accountKeys, prevSince, prevUntil),
   ])
+  const { insights, conversionsDaily, dealTotals } = current
 
-  const curr = summarize(insights, conversionsDaily, dealTotals)
-  const prev = summarize(prevInsights, prevConversionsDaily, prevDealTotals)
+  const curr = summarize(current.insights, current.conversionsDaily, current.dealTotals)
+  const prev = summarize(previous.insights, previous.conversionsDaily, previous.dealTotals)
   const { totalSpend, totalLeads, cpl, roasReal, roasProjected, conversionRate } = curr
 
   const spendDelta = calcDelta(curr.totalSpend, prev.totalSpend)
@@ -97,7 +94,14 @@ export default async function DashboardPage({
       <Nav />
       <main className="flex-1 p-8">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold">Dashboard</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold">Dashboard</h2>
+            {selection === 'all' && (
+              <span className="text-xs font-medium text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">
+                Todas as contas
+              </span>
+            )}
+          </div>
           <Suspense fallback={null}>
             <DateFilter from={since ?? ''} to={until} />
           </Suspense>

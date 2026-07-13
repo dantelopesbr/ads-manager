@@ -4,7 +4,7 @@ import { LeadsTable } from '@/components/leads/leads-table'
 import { DateFilter } from '@/components/date-filter'
 import { format } from 'date-fns'
 import { Suspense } from 'react'
-import { getAccount } from '@/lib/account-server'
+import { getAccount, getAccountSelection } from '@/lib/account-server'
 import { ACCOUNTS } from '@/lib/account'
 import { dedupeByClickId } from '@/lib/conversions'
 
@@ -21,6 +21,7 @@ export default async function LeadsPage({
   const since = from ?? null
   const until = to ?? today
 
+  const selection = await getAccountSelection()
   const account = await getAccount()
   const { phoneCompany } = ACCOUNTS[account]
 
@@ -78,6 +79,11 @@ export default async function LeadsPage({
           <h2 className="text-2xl font-bold">Leads</h2>
           <Suspense fallback={null}><DateFilter from={since ?? ''} to={until} /></Suspense>
         </div>
+        {selection === 'all' && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
+            Modo “Todas as contas” só se aplica ao Dashboard — mostrando {ACCOUNTS[account].label} aqui.
+          </p>
+        )}
         <p className="text-sm text-slate-500 mb-6">{label} · {leads.length} leads</p>
         <div className="bg-white rounded-xl border p-6">
           <LeadsTable leads={leads} />

@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { AccountSwitcher } from './account-switcher'
-import { ACCOUNT_COOKIE, type AccountKey } from '@/lib/account'
+import { ACCOUNT_COOKIE, isAccountKey, type AccountSelection } from '@/lib/account'
 import { useEffect, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -56,17 +56,19 @@ const links = [
   { href: '/settings', label: 'Configurações' },
 ]
 
-function getCookieAccount(): AccountKey {
+function getCookieAccount(): AccountSelection {
   if (typeof document === 'undefined') return 'fratellihouse'
   const match = document.cookie.match(new RegExp(`${ACCOUNT_COOKIE}=([^;]+)`))
-  return match?.[1] === 'fratellirev' ? 'fratellirev' : 'fratellihouse'
+  const val = match?.[1]
+  if (val === 'all') return 'all'
+  return isAccountKey(val) ? val : 'fratellihouse'
 }
 
 export function Nav() {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
-  const [account, setAccount] = useState<AccountKey>('fratellihouse')
+  const [account, setAccount] = useState<AccountSelection>('fratellihouse')
 
   useEffect(() => { setAccount(getCookieAccount()) }, [])
 

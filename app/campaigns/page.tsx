@@ -6,7 +6,7 @@ import { calcCPL, calcCTR, calcROAS } from '@/lib/metrics'
 import { fetchMetaCampaigns, fetchMetaAdsets, fetchMetaAds } from '@/lib/meta/client'
 import { format } from 'date-fns'
 import { Suspense } from 'react'
-import { getAccount } from '@/lib/account-server'
+import { getAccount, getAccountSelection } from '@/lib/account-server'
 import { ACCOUNTS } from '@/lib/account'
 import { getInsightsByAd, getConversionLeadCounts, getConversionPhoneTouches } from '@/lib/queries'
 
@@ -39,6 +39,7 @@ export default async function CampaignsPage({
   const until = to ?? today
   const EPOCH = '2000-01-01' // sentinel: no lower bound set by user → all-time
 
+  const selection = await getAccountSelection()
   const account = await getAccount()
   const { phoneCompany } = ACCOUNTS[account]
 
@@ -192,6 +193,11 @@ export default async function CampaignsPage({
           <h2 className="text-2xl font-bold">Campanhas</h2>
           <Suspense fallback={null}><DateFilter from={since ?? ''} to={until} /></Suspense>
         </div>
+        {selection === 'all' && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-4">
+            Modo “Todas as contas” só se aplica ao Dashboard — mostrando {ACCOUNTS[account].label} aqui.
+          </p>
+        )}
         <div className="bg-white rounded-xl border p-6">
           <CampaignsTable campaigns={campaigns} avgCpl={avgCpl} />
         </div>

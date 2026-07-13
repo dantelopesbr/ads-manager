@@ -1,4 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js'
+import { ACCOUNTS, type AccountKey } from '@/lib/account'
 
 export interface DailySpend { date: string; spend: number }
 export interface DailyLeads { day: string; leads: number }
@@ -93,4 +94,47 @@ export async function getConversionPhoneTouches(
   })
   if (error) throw error
   return data ?? []
+}
+
+export interface DashboardPeriodData {
+  insights: DailySpend[]
+  conversionsDaily: DailyLeads[]
+  dealTotals: DealTotals
+}
+
+function mergeDealTotals(a: DealTotals, b: DealTotals): DealTotals {
+  return {
+    total_deal_value: a.total_deal_value + b.total_deal_value,
+    won_deal_value: a.won_deal_value + b.won_deal_value,
+    deal_count: a.deal_count + b.deal_count,
+    won_count: a.won_count + b.won_count,
+  }
+}
+
+/**
+ * Dashboard data for one or more accounts, merged. Daily rows are simply
+ * concatenated — the caller already sums same-day rows when building a
+ * per-date map, so two accounts' rows for the same date add up correctly.
+ */
+export async function getDashboardPeriodData(
+  supabase: SupabaseClient, accountKeys: AccountKey[], since: string, until: string
+): Promise<DashboardPeriodData> {
+  const perAccount = await Promise.all(accountKeys.map(async key => {
+    const { phoneCompany } = ACCOUNTS[key]
+    const [insights, conversionsDaily, dealTotals] = await Promise.all([
+      getInsightsDaily(supabase, key, since, until),
+      getConversionsDaily(supabase, phoneCompany, since, until),
+      getDashboardDealTotals(supabase, phoneCompany, since, until),
+    ])
+    return { insights, conversionsDaily, dealTotals }
+  }))
+
+  return {
+    insights: perAccount.flatMap(p => p.insights),
+    conversionsDaily: perAccount.flatMap(p => p.conversionsDaily),
+    dealTotals: perAccount.reduce(
+      (acc, p) => mergeDealTotals(acc, p.dealTotals),
+      { total_deal_value: 0, won_deal_value: 0, deal_count: 0, won_count: 0 }
+    ),
+  }
 }
