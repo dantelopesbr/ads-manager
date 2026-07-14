@@ -8,14 +8,14 @@ export const maxDuration = 60
 async function runEnrich() {
   const supabase = await createServiceClient()
   try {
-    const count = await enrichLeads(supabase)
+    const { enriched, callsError } = await enrichLeads(supabase)
     await supabase.from('sync_logs').insert({
       type: 'hubspot',
       status: 'success',
-      records_synced: count,
-      message: `Enriched ${count} contacts`,
+      records_synced: enriched,
+      message: callsError ? `Enriched ${enriched} contacts. Calls sync error: ${callsError}` : `Enriched ${enriched} contacts`,
     })
-    return NextResponse.json({ enriched: count })
+    return NextResponse.json({ enriched, callsError })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     await supabase.from('sync_logs').insert({

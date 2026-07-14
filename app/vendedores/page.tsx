@@ -6,9 +6,9 @@ import { format, subDays } from 'date-fns'
 import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
 import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
-import { getOwnerBreakdown, getWhatsappMessages, getTeamPhones } from '@/lib/queries'
+import { getOwnerBreakdown, getWhatsappMessages, getTeamPhones, getCalls } from '@/lib/queries'
 import { classifyMessage, buildTeamPhoneIndex, normalizePhoneSuffix, KNOWN_VENDORS, IA_VENDORS } from '@/lib/whatsapp-team'
-import { MessagesChart } from '@/components/vendedores/messages-chart'
+import { ActivityChart } from '@/components/vendedores/activity-chart'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,10 +29,11 @@ export default async function VendedoresPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [rows, messages, teamPhones] = await Promise.all([
+  const [rows, messages, teamPhones, calls] = await Promise.all([
     getOwnerBreakdown(supabase, accountKeys, since, until),
     getWhatsappMessages(supabase, since, until),
     getTeamPhones(supabase),
+    getCalls(supabase, since, until),
   ])
 
   const teamIndex = buildTeamPhoneIndex(teamPhones)
@@ -57,6 +58,25 @@ export default async function VendedoresPage({
     .sort((a, b) => b.contacts - a.contacts)
   const messagesChartVendors = [...KNOWN_VENDORS, ...IA_VENDORS].filter(v => messageCountByVendor[v] > 0)
   const messagesChartData = Object.keys(dailyByVendor).sort().map(day => ({ date: day, ...dailyByVendor[day] }))
+
+  const callContactsByOwner: Record<string, Set<string>> = {}
+  const callCountByOwner: Record<string, number> = {}
+  const dailyByCallOwner: Record<string, Record<string, number>> = {}
+  for (const c of calls) {
+    const owner = c.owner_name ?? SEM_VENDEDOR
+    if (!callContactsByOwner[owner]) callContactsByOwner[owner] = new Set()
+    if (c.phone) callContactsByOwner[owner].add(c.phone)
+    callCountByOwner[owner] = (callCountByOwner[owner] ?? 0) + 1
+
+    const day = c.call_at.split('T')[0]
+    if (!dailyByCallOwner[day]) dailyByCallOwner[day] = {}
+    dailyByCallOwner[day][owner] = (dailyByCallOwner[day][owner] ?? 0) + 1
+  }
+  const callRows = Object.keys(callContactsByOwner)
+    .map(name => ({ name, contacts: callContactsByOwner[name].size, calls: callCountByOwner[name] ?? 0 }))
+    .sort((a, b) => b.contacts - a.contacts)
+  const callsChartVendors = Object.keys(callContactsByOwner)
+  const callsChartData = Object.keys(dailyByCallOwner).sort().map(day => ({ date: day, ...dailyByCallOwner[day] }))
 
   type OwnerAgg = { leads: number; deals: number; won: number; valueProjected: number; valueWon: number }
   const byOwner: Record<string, OwnerAgg> = {}
@@ -162,7 +182,41 @@ export default async function VendedoresPage({
         {messagesChartData.length > 0 && (
           <div className="bg-white rounded-xl border p-6 mt-6">
             <h4 className="text-sm font-semibold mb-4 text-slate-600">Mensagens por dia</h4>
-            <MessagesChart data={messagesChartData} vendors={messagesChartVendors} />
+            <ActivityChart data={messagesChartData} vendors={messagesChartVendors} />
+          </div>
+        )}
+
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Ligações · {periodLabel}</h3>
+        <div className="bg-white rounded-xl border p-6 max-w-md">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-slate-500 text-left">
+                <th className="pb-3 pr-4 font-medium">Vendedor</th>
+                <th className="pb-3 pr-4 font-medium text-right">Contatos</th>
+                <th className="pb-3 font-medium text-right">Ligações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {callRows.map(c => (
+                <tr key={c.name} className="border-b last:border-0 hover:bg-slate-50">
+                  <td className={`py-2.5 pr-4 ${c.name === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>{c.name}</td>
+                  <td className="py-2.5 pr-4 text-right">{c.contacts}</td>
+                  <td className="py-2.5 text-right text-slate-500">{c.calls}</td>
+                </tr>
+              ))}
+              {callRows.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="py-6 text-center text-slate-400 text-sm">Nenhuma ligação no período</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {callsChartData.length > 0 && (
+          <div className="bg-white rounded-xl border p-6 mt-6">
+            <h4 className="text-sm font-semibold mb-4 text-slate-600">Ligações por dia</h4>
+            <ActivityChart data={callsChartData} vendors={callsChartVendors} />
           </div>
         )}
       </main>

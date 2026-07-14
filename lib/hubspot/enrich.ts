@@ -1,5 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js'
-import { searchContactByPhone, getTotalDealValue, fetchOwners } from './client'
+import { searchContactByPhone, getTotalDealValue, fetchOwners, getContactCalls } from './client'
 
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -25,7 +25,9 @@ const BATCH_LIMIT = 150
 // still prioritized (never-synced phones first).
 const TIME_BUDGET_MS = 50_000
 
-export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
+export interface EnrichResult { enriched: number; callsError: string | null }
+
+export async function enrichLeads(supabase: SupabaseClient): Promise<EnrichResult> {
   const apiKey = process.env.HUBSPOT_API_KEY!
 
   // All phones from conversions — paginate to avoid 1000-row default cap
@@ -45,7 +47,7 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
     page++
   }
 
-  if (allPhones.size === 0) return 0
+  if (allPhones.size === 0) return { enriched: 0, callsError: null }
 
   // Existing sync status for phones we care about, batched to avoid the .in() URL length limit
   const phoneList = [...allPhones]
@@ -82,13 +84,14 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
 
   const toSync = [...neverSynced, ...missingOwner, ...stale].slice(0, BATCH_LIMIT)
 
-  if (toSync.length === 0) return 0
+  if (toSync.length === 0) return { enriched: 0, callsError: null }
 
   // Owners are a small, slow-changing list — fetch once per run rather than per contact.
   const owners = await withRetry(() => fetchOwners(apiKey)).catch(() => [])
   const ownerNameById = new Map(owners.map(o => [o.id, o.name]))
 
   let enriched = 0
+  let callsError: string | null = null
   const startedAt = Date.now()
 
   for (const phone of toSync) {
@@ -105,10 +108,35 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<number> {
         { onConflict: 'phone' }
       )
       enriched++
+
+      // Calls are supplementary — fetched after the contact/deal upsert so a
+      // failure here never loses that sync. One extra round trip per contact,
+      // so this batch effectively runs slower; the time-budget check above
+      // already handles that gracefully (fewer contacts/run, not a timeout).
+      try {
+        const calls = await withRetry(() => getContactCalls(contact.hs_contact_id, apiKey))
+        if (calls.length > 0) {
+          const callRows = calls.map(c => ({
+            hs_call_id: c.hs_call_id,
+            phone,
+            owner_id: c.owner_id,
+            owner_name: c.owner_id ? ownerNameById.get(c.owner_id) ?? null : null,
+            call_at: new Date(Number(c.call_at)).toISOString(),
+            direction: c.direction,
+            disposition: c.disposition,
+          }))
+          await supabase.from('hubspot_calls').upsert(callRows, { onConflict: 'hs_call_id' })
+        }
+      } catch (err) {
+        // best-effort — contact sync above already succeeded. Keep the first
+        // error only, surfaced via sync_logs, so a systematic failure (wrong
+        // scope, wrong endpoint) is visible instead of silently zeroing calls.
+        if (!callsError) callsError = err instanceof Error ? err.message : String(err)
+      }
     } catch {
       continue
     }
   }
 
-  return enriched
+  return { enriched, callsError }
 }

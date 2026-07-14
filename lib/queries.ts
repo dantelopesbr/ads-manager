@@ -253,3 +253,26 @@ export async function getTeamPhones(supabase: SupabaseClient): Promise<TeamPhone
   if (error) throw error
   return data ?? []
 }
+
+export interface CallRow { phone: string; owner_name: string | null; call_at: string }
+
+/** Call history synced from HubSpot — owner_name is resolved at sync time, no join needed here. */
+export async function getCalls(
+  supabase: SupabaseClient, since: string, until: string
+): Promise<CallRow[]> {
+  const rows: CallRow[] = []
+  const PAGE = 1000
+  for (let page = 0; ; page++) {
+    const { data, error } = await supabase
+      .from('hubspot_calls')
+      .select('phone, owner_name, call_at')
+      .gte('call_at', since)
+      .lte('call_at', `${until}T23:59:59`)
+      .range(page * PAGE, (page + 1) * PAGE - 1)
+    if (error) throw error
+    if (!data?.length) break
+    rows.push(...data)
+    if (data.length < PAGE) break
+  }
+  return rows
+}

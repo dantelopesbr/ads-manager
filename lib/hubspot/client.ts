@@ -106,6 +106,49 @@ export async function getTotalDealValue(
   }
 }
 
+export interface HubSpotCall {
+  hs_call_id: string
+  owner_id: string | null
+  call_at: string
+  direction: string | null
+  disposition: string | null
+}
+
+export async function getContactCalls(
+  contactId: string,
+  apiKey: string
+): Promise<HubSpotCall[]> {
+  const data = await hubspotFetch(
+    `/crm/v3/objects/contacts/${contactId}/associations/calls`,
+    { method: 'GET' },
+    apiKey
+  )
+
+  if (!data.results?.length) return []
+
+  const callIds: string[] = data.results.map((r: { id: string }) => r.id)
+  const calls: HubSpotCall[] = []
+
+  for (const callId of callIds) {
+    const call = await hubspotFetch(
+      `/crm/v3/objects/calls/${callId}?properties=hs_timestamp,hubspot_owner_id,hs_call_direction,hs_call_disposition`,
+      { method: 'GET' },
+      apiKey
+    )
+    const timestamp: string | null = call.properties?.hs_timestamp ?? null
+    if (!timestamp) continue // no timestamp means we can't place it on the calls chart — skip
+    calls.push({
+      hs_call_id: callId,
+      owner_id: call.properties?.hubspot_owner_id ?? null,
+      call_at: timestamp,
+      direction: call.properties?.hs_call_direction ?? null,
+      disposition: call.properties?.hs_call_disposition ?? null,
+    })
+  }
+
+  return calls
+}
+
 export interface HubSpotOwner {
   id: string
   name: string
