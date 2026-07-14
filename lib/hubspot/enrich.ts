@@ -1,5 +1,8 @@
 import { SupabaseClient } from '@supabase/supabase-js'
-import { searchContactByPhone, getTotalDealValue, fetchOwners, getContactCalls } from './client'
+import {
+  searchContactByPhone, getTotalDealValue, fetchOwners,
+  searchRecentCalls, getCallContactIds, getContactPhone,
+} from './client'
 
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -22,13 +25,17 @@ const BATCH_LIMIT = 150
 // Vercel Hobby cron can only run once a day, so a bigger batch matters more than
 // before — but the route's maxDuration is capped at 60s. Stop with margin to spare
 // rather than risk a hard timeout mid-run; whatever's left picks up next run,
-// still prioritized (never-synced phones first).
+// still prioritized (never-synced phones first). Shared with the calls sweep below —
+// both phases race against the same clock so the route never risks a hard timeout.
 const TIME_BUDGET_MS = 50_000
 
-export interface EnrichResult { enriched: number; callsError: string | null }
+const CALLS_LOOKBACK_DAYS = 30
+
+export interface EnrichResult { enriched: number; callsSynced: number; callsError: string | null }
 
 export async function enrichLeads(supabase: SupabaseClient): Promise<EnrichResult> {
   const apiKey = process.env.HUBSPOT_API_KEY!
+  const startedAt = Date.now()
 
   // All phones from conversions — paginate to avoid 1000-row default cap
   const allPhones = new Set<string>()
@@ -47,96 +54,142 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<EnrichResul
     page++
   }
 
-  if (allPhones.size === 0) return { enriched: 0, callsError: null }
-
-  // Existing sync status for phones we care about, batched to avoid the .in() URL length limit
-  const phoneList = [...allPhones]
-  type SyncStatus = { updatedAt: string; hasDealButNoOwner: boolean }
-  const statusByPhone = new Map<string, SyncStatus>()
-  for (let i = 0; i < phoneList.length; i += 100) {
-    const { data } = await supabase
-      .from('hubspot_contacts')
-      .select('phone, updated_at, deal_stage, owner_name')
-      .in('phone', phoneList.slice(i, i + 100))
-    for (const row of data ?? []) {
-      statusByPhone.set(row.phone, { updatedAt: row.updated_at, hasDealButNoOwner: !!row.deal_stage && !row.owner_name })
-    }
-  }
-
-  const resyncCutoff = new Date()
-  resyncCutoff.setDate(resyncCutoff.getDate() - RESYNC_AFTER_DAYS)
-  const resyncCutoffIso = resyncCutoff.toISOString()
-
-  // Never-synced phones (zero HubSpot data) go first; contacts that already have a
-  // deal but never got owner_name backfilled (added after they were last synced)
-  // go next, regardless of freshness — otherwise a new field never fills in until
-  // the routine 7-day resync happens to reach them; routine stale resyncs fill
-  // any leftover budget.
-  const neverSynced: string[] = []
-  const missingOwner: string[] = []
-  const stale: string[] = []
-  for (const phone of phoneList) {
-    const status = statusByPhone.get(phone)
-    if (!status) neverSynced.push(phone)
-    else if (status.updatedAt < resyncCutoffIso) stale.push(phone)
-    else if (status.hasDealButNoOwner) missingOwner.push(phone)
-  }
-
-  const toSync = [...neverSynced, ...missingOwner, ...stale].slice(0, BATCH_LIMIT)
-
-  if (toSync.length === 0) return { enriched: 0, callsError: null }
-
   // Owners are a small, slow-changing list — fetch once per run rather than per contact.
   const owners = await withRetry(() => fetchOwners(apiKey)).catch(() => [])
   const ownerNameById = new Map(owners.map(o => [o.id, o.name]))
 
   let enriched = 0
-  let callsError: string | null = null
-  const startedAt = Date.now()
 
-  for (const phone of toSync) {
-    if (Date.now() - startedAt > TIME_BUDGET_MS) break
-    try {
-      const contact = await withRetry(() => searchContactByPhone(phone, apiKey))
-      if (!contact) continue
-
-      const deal = await withRetry(() => getTotalDealValue(contact.hs_contact_id, apiKey))
-      const owner_name = deal.owner_id ? ownerNameById.get(deal.owner_id) ?? null : null
-
-      await supabase.from('hubspot_contacts').upsert(
-        { ...contact, ...deal, owner_name, phone, updated_at: new Date().toISOString() },
-        { onConflict: 'phone' }
-      )
-      enriched++
-
-      // Calls are supplementary — fetched after the contact/deal upsert so a
-      // failure here never loses that sync. One extra round trip per contact,
-      // so this batch effectively runs slower; the time-budget check above
-      // already handles that gracefully (fewer contacts/run, not a timeout).
-      try {
-        const calls = await withRetry(() => getContactCalls(contact.hs_contact_id, apiKey))
-        if (calls.length > 0) {
-          const callRows = calls.map(c => ({
-            hs_call_id: c.hs_call_id,
-            phone,
-            owner_id: c.owner_id,
-            owner_name: c.owner_id ? ownerNameById.get(c.owner_id) ?? null : null,
-            call_at: c.call_at,
-            direction: c.direction,
-            disposition: c.disposition,
-          }))
-          await supabase.from('hubspot_calls').upsert(callRows, { onConflict: 'hs_call_id' })
-        }
-      } catch (err) {
-        // best-effort — contact sync above already succeeded. Keep the first
-        // error only, surfaced via sync_logs, so a systematic failure (wrong
-        // scope, wrong endpoint) is visible instead of silently zeroing calls.
-        if (!callsError) callsError = err instanceof Error ? err.message : String(err)
+  if (allPhones.size > 0) {
+    // Existing sync status for phones we care about, batched to avoid the .in() URL length limit
+    const phoneList = [...allPhones]
+    type SyncStatus = { updatedAt: string; hasDealButNoOwner: boolean }
+    const statusByPhone = new Map<string, SyncStatus>()
+    for (let i = 0; i < phoneList.length; i += 100) {
+      const { data } = await supabase
+        .from('hubspot_contacts')
+        .select('phone, updated_at, deal_stage, owner_name')
+        .in('phone', phoneList.slice(i, i + 100))
+      for (const row of data ?? []) {
+        statusByPhone.set(row.phone, { updatedAt: row.updated_at, hasDealButNoOwner: !!row.deal_stage && !row.owner_name })
       }
-    } catch {
-      continue
+    }
+
+    const resyncCutoff = new Date()
+    resyncCutoff.setDate(resyncCutoff.getDate() - RESYNC_AFTER_DAYS)
+    const resyncCutoffIso = resyncCutoff.toISOString()
+
+    // Never-synced phones (zero HubSpot data) go first; contacts that already have a
+    // deal but never got owner_name backfilled (added after they were last synced)
+    // go next, regardless of freshness — otherwise a new field never fills in until
+    // the routine 7-day resync happens to reach them; routine stale resyncs fill
+    // any leftover budget.
+    const neverSynced: string[] = []
+    const missingOwner: string[] = []
+    const stale: string[] = []
+    for (const phone of phoneList) {
+      const status = statusByPhone.get(phone)
+      if (!status) neverSynced.push(phone)
+      else if (status.updatedAt < resyncCutoffIso) stale.push(phone)
+      else if (status.hasDealButNoOwner) missingOwner.push(phone)
+    }
+
+    const toSync = [...neverSynced, ...missingOwner, ...stale].slice(0, BATCH_LIMIT)
+
+    for (const phone of toSync) {
+      if (Date.now() - startedAt > TIME_BUDGET_MS) break
+      try {
+        const contact = await withRetry(() => searchContactByPhone(phone, apiKey))
+        if (!contact) continue
+
+        const deal = await withRetry(() => getTotalDealValue(contact.hs_contact_id, apiKey))
+        const owner_name = deal.owner_id ? ownerNameById.get(deal.owner_id) ?? null : null
+
+        await supabase.from('hubspot_contacts').upsert(
+          { ...contact, ...deal, owner_name, phone, updated_at: new Date().toISOString() },
+          { onConflict: 'phone' }
+        )
+        enriched++
+      } catch {
+        continue
+      }
     }
   }
 
-  return { enriched, callsError }
+  const { synced: callsSynced, error: callsError } = await syncRecentCalls(supabase, apiKey, ownerNameById, startedAt)
+
+  return { enriched, callsSynced, callsError }
+}
+
+/**
+ * Sweeps the Calls object directly (not per-contact associations), so a call
+ * shows up even for a contact our enrich loop above hasn't reached yet.
+ * Rolling 30-day window, idempotent upsert by hs_call_id — self-heals across
+ * runs rather than needing to track a sync cursor.
+ */
+async function syncRecentCalls(
+  supabase: SupabaseClient,
+  apiKey: string,
+  ownerNameById: Map<string, string>,
+  startedAt: number
+): Promise<{ synced: number; error: string | null }> {
+  const sinceMs = Date.now() - CALLS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000
+  const contactPhoneCache = new Map<string, string | null>()
+  let synced = 0
+  let error: string | null = null
+  let after: string | undefined
+
+  try {
+    do {
+      if (Date.now() - startedAt > TIME_BUDGET_MS) break
+      const { calls, nextAfter } = await withRetry(() => searchRecentCalls(apiKey, sinceMs, after))
+
+      for (const call of calls) {
+        if (Date.now() - startedAt > TIME_BUDGET_MS) break
+        try {
+          const contactIds = await withRetry(() => getCallContactIds(call.id, apiKey))
+          if (contactIds.length === 0) continue
+          const contactId = contactIds[0]
+
+          let phone: string | null
+          if (contactPhoneCache.has(contactId)) {
+            phone = contactPhoneCache.get(contactId) ?? null
+          } else {
+            const { data: local } = await supabase
+              .from('hubspot_contacts')
+              .select('phone')
+              .eq('hs_contact_id', contactId)
+              .maybeSingle()
+            if (local?.phone) {
+              phone = local.phone
+            } else {
+              const remotePhone = await withRetry(() => getContactPhone(contactId, apiKey))
+              phone = remotePhone ?? null
+            }
+            contactPhoneCache.set(contactId, phone)
+          }
+          if (!phone) continue
+
+          await supabase.from('hubspot_calls').upsert({
+            hs_call_id: call.hs_call_id,
+            phone,
+            owner_id: call.owner_id,
+            owner_name: call.owner_id ? ownerNameById.get(call.owner_id) ?? null : null,
+            call_at: call.call_at,
+            direction: call.direction,
+            disposition: call.disposition,
+          }, { onConflict: 'hs_call_id' })
+          synced++
+        } catch (err) {
+          if (!error) error = err instanceof Error ? err.message : String(err)
+        }
+      }
+
+      after = nextAfter ?? undefined
+    } while (after)
+  } catch (err) {
+    if (!error) error = err instanceof Error ? err.message : String(err)
+  }
+
+  return { synced, error }
 }
