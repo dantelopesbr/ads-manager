@@ -39,7 +39,7 @@ export default async function VendedoresPage({
   const teamIndex = buildTeamPhoneIndex(teamPhones)
   const contactsByVendor: Record<string, Set<string>> = {}
   const messageCountByVendor: Record<string, number> = {}
-  const dailyByVendor: Record<string, Record<string, number>> = {}
+  const dailyContactsByVendor: Record<string, Record<string, Set<string>>> = {}
   for (const m of messages) {
     const teamLabel = teamIndex.get(normalizePhoneSuffix(m.phone_fratelli) ?? '') ?? null
     const classified = classifyMessage(m.source, teamLabel)
@@ -49,15 +49,21 @@ export default async function VendedoresPage({
     if (m.phone) contactsByVendor[bucket].add(m.phone)
     messageCountByVendor[bucket] = (messageCountByVendor[bucket] ?? 0) + 1
 
+    // Chart tracks conversations started (distinct contacts/day), not raw message volume.
     const day = m.created_at.split('T')[0]
-    if (!dailyByVendor[day]) dailyByVendor[day] = {}
-    dailyByVendor[day][bucket] = (dailyByVendor[day][bucket] ?? 0) + 1
+    if (!dailyContactsByVendor[day]) dailyContactsByVendor[day] = {}
+    if (!dailyContactsByVendor[day][bucket]) dailyContactsByVendor[day][bucket] = new Set()
+    if (m.phone) dailyContactsByVendor[day][bucket].add(m.phone)
   }
   const messageRows = [...KNOWN_VENDORS, ...IA_VENDORS]
     .map(name => ({ name, contacts: contactsByVendor[name]?.size ?? 0, messages: messageCountByVendor[name] ?? 0 }))
     .sort((a, b) => b.contacts - a.contacts)
   const messagesChartVendors = [...KNOWN_VENDORS, ...IA_VENDORS].filter(v => messageCountByVendor[v] > 0)
-  const messagesChartData = Object.keys(dailyByVendor).sort().map(day => ({ date: day, ...dailyByVendor[day] }))
+  const messagesChartData = Object.keys(dailyContactsByVendor).sort().map(day => {
+    const row: { date: string; [vendor: string]: string | number } = { date: day }
+    for (const [vendor, set] of Object.entries(dailyContactsByVendor[day])) row[vendor] = set.size
+    return row
+  })
 
   const callContactsByOwner: Record<string, Set<string>> = {}
   const callCountByOwner: Record<string, number> = {}
@@ -181,7 +187,7 @@ export default async function VendedoresPage({
 
         {messagesChartData.length > 0 && (
           <div className="bg-white rounded-xl border p-6 mt-6">
-            <h4 className="text-sm font-semibold mb-4 text-slate-600">Mensagens por dia</h4>
+            <h4 className="text-sm font-semibold mb-4 text-slate-600">Conversas iniciadas por dia (contatos distintos)</h4>
             <ActivityChart data={messagesChartData} vendors={messagesChartVendors} />
           </div>
         )}
