@@ -23,11 +23,13 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
 const RESYNC_AFTER_DAYS = 7
 const BATCH_LIMIT = 150
 // Vercel Hobby cron can only run once a day, so a bigger batch matters more than
-// before — but the route's maxDuration is capped at 60s. Stop with margin to spare
-// rather than risk a hard timeout mid-run; whatever's left picks up next run,
-// still prioritized (never-synced phones first). Shared with the calls sweep below —
-// both phases race against the same clock so the route never risks a hard timeout.
-const TIME_BUDGET_MS = 50_000
+// before — but the route's maxDuration is capped at 60s. Each phase gets its own
+// fixed budget, timed from when THAT phase starts — sharing one clock meant the
+// contact loop (which reliably fills its whole budget with 150 contacts) always
+// starved the calls sweep down to zero, since by the time calls sync started the
+// shared clock had already run out.
+const CONTACTS_TIME_BUDGET_MS = 30_000
+const CALLS_TIME_BUDGET_MS = 20_000
 
 const CALLS_LOOKBACK_DAYS = 30
 
@@ -35,7 +37,7 @@ export interface EnrichResult { enriched: number; callsSynced: number; callsErro
 
 export async function enrichLeads(supabase: SupabaseClient): Promise<EnrichResult> {
   const apiKey = process.env.HUBSPOT_API_KEY!
-  const startedAt = Date.now()
+  const contactsStartedAt = Date.now()
 
   // All phones from conversions — paginate to avoid 1000-row default cap
   const allPhones = new Set<string>()
@@ -97,7 +99,7 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<EnrichResul
     const toSync = [...neverSynced, ...missingOwner, ...stale].slice(0, BATCH_LIMIT)
 
     for (const phone of toSync) {
-      if (Date.now() - startedAt > TIME_BUDGET_MS) break
+      if (Date.now() - contactsStartedAt > CONTACTS_TIME_BUDGET_MS) break
       try {
         const contact = await withRetry(() => searchContactByPhone(phone, apiKey))
         if (!contact) continue
@@ -116,7 +118,7 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<EnrichResul
     }
   }
 
-  const { synced: callsSynced, error: callsError } = await syncRecentCalls(supabase, apiKey, ownerNameById, startedAt)
+  const { synced: callsSynced, error: callsError } = await syncRecentCalls(supabase, apiKey, ownerNameById)
 
   return { enriched, callsSynced, callsError }
 }
@@ -124,28 +126,40 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<EnrichResul
 /**
  * Sweeps the Calls object directly (not per-contact associations), so a call
  * shows up even for a contact our enrich loop above hasn't reached yet.
- * Rolling 30-day window, idempotent upsert by hs_call_id — self-heals across
- * runs rather than needing to track a sync cursor.
+ * Rolling 30-day window, idempotent upsert by hs_call_id.
+ *
+ * No single run gets through the whole window in its time budget (each call
+ * costs 1-2 extra HubSpot round trips), so the HubSpot pagination cursor is
+ * persisted in hubspot_calls_sync_state between runs — otherwise every run
+ * restarts at page 1 (most recent calls) and older ones are never reached.
+ * The cursor resets to null once a full pass reaches the end of the window,
+ * so the next run starts fresh at the top again and picks up new calls.
  */
 async function syncRecentCalls(
   supabase: SupabaseClient,
   apiKey: string,
-  ownerNameById: Map<string, string>,
-  startedAt: number
+  ownerNameById: Map<string, string>
 ): Promise<{ synced: number; error: string | null }> {
-  const sinceMs = Date.now() - CALLS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000
+  const startedAt = Date.now()
+  const sinceMs = startedAt - CALLS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000
   const contactPhoneCache = new Map<string, string | null>()
   let synced = 0
   let error: string | null = null
-  let after: string | undefined
+
+  const { data: state } = await supabase
+    .from('hubspot_calls_sync_state')
+    .select('after_cursor')
+    .eq('id', 1)
+    .maybeSingle()
+  let after: string | undefined = state?.after_cursor ?? undefined
 
   try {
     do {
-      if (Date.now() - startedAt > TIME_BUDGET_MS) break
+      if (Date.now() - startedAt > CALLS_TIME_BUDGET_MS) break
       const { calls, nextAfter } = await withRetry(() => searchRecentCalls(apiKey, sinceMs, after))
 
       for (const call of calls) {
-        if (Date.now() - startedAt > TIME_BUDGET_MS) break
+        if (Date.now() - startedAt > CALLS_TIME_BUDGET_MS) break
         try {
           const contactIds = await withRetry(() => getCallContactIds(call.id, apiKey))
           if (contactIds.length === 0) continue
@@ -170,7 +184,7 @@ async function syncRecentCalls(
           }
           if (!phone) continue
 
-          await supabase.from('hubspot_calls').upsert({
+          const { error: upsertError } = await supabase.from('hubspot_calls').upsert({
             hs_call_id: call.hs_call_id,
             phone,
             owner_id: call.owner_id,
@@ -179,6 +193,7 @@ async function syncRecentCalls(
             direction: call.direction,
             disposition: call.disposition,
           }, { onConflict: 'hs_call_id' })
+          if (upsertError) throw new Error(upsertError.message)
           synced++
         } catch (err) {
           if (!error) error = err instanceof Error ? err.message : String(err)
@@ -190,6 +205,12 @@ async function syncRecentCalls(
   } catch (err) {
     if (!error) error = err instanceof Error ? err.message : String(err)
   }
+
+  // Persist wherever we ended up — null (loop exhausted) restarts the next
+  // pass at the top; a live cursor lets the next run continue deeper in.
+  await supabase
+    .from('hubspot_calls_sync_state')
+    .upsert({ id: 1, after_cursor: after ?? null, updated_at: new Date().toISOString() }, { onConflict: 'id' })
 
   return { synced, error }
 }
