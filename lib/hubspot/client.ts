@@ -135,12 +135,16 @@ export async function getContactCalls(
       { method: 'GET' },
       apiKey
     )
-    const timestamp: string | null = call.properties?.hs_timestamp ?? null
-    if (!timestamp) continue // no timestamp means we can't place it on the calls chart — skip
+    const rawTimestamp: string | null = call.properties?.hs_timestamp ?? null
+    if (!rawTimestamp) continue // no timestamp means we can't place it on the calls chart — skip
+    // hs_timestamp comes back as epoch millis in some responses, ISO-8601 in others.
+    const asEpoch = Number(rawTimestamp)
+    const date = Number.isFinite(asEpoch) ? new Date(asEpoch) : new Date(rawTimestamp)
+    if (isNaN(date.getTime())) continue // unparseable — skip this call rather than fail the whole contact
     calls.push({
       hs_call_id: callId,
       owner_id: call.properties?.hubspot_owner_id ?? null,
-      call_at: timestamp,
+      call_at: date.toISOString(),
       direction: call.properties?.hs_call_direction ?? null,
       disposition: call.properties?.hs_call_disposition ?? null,
     })

@@ -121,7 +121,7 @@ export async function enrichLeads(supabase: SupabaseClient): Promise<EnrichResul
             phone,
             owner_id: c.owner_id,
             owner_name: c.owner_id ? ownerNameById.get(c.owner_id) ?? null : null,
-            call_at: new Date(Number(c.call_at)).toISOString(),
+            call_at: c.call_at,
             direction: c.direction,
             disposition: c.disposition,
           }))
