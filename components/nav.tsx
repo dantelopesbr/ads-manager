@@ -53,6 +53,7 @@ const links = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/campaigns', label: 'Campanhas' },
   { href: '/leads', label: 'Leads' },
+  { href: '/sem-atendimento', label: 'Sem Atendimento' },
   { href: '/vendedores', label: 'Vendedores' },
   { href: '/settings', label: 'Configurações' },
 ]
