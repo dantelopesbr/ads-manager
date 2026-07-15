@@ -4,6 +4,10 @@ export interface HubSpotContactResult {
   hs_contact_id: string
   phone: string
   lifecycle_stage: string | null
+  // "Proprietário do contato" — the contact's own owner property, distinct
+  // from a deal's owner (a contact can have an owner with no deal yet, or a
+  // deal owned by someone other than whoever owns the contact record).
+  contact_owner_id: string | null
 }
 
 export interface HubSpotDeal {
@@ -34,7 +38,7 @@ export async function searchContactByPhone(
     filterGroups: [{
       filters: [{ propertyName: 'phone', operator: 'EQ', value: phone }]
     }],
-    properties: ['phone', 'lifecyclestage'],
+    properties: ['phone', 'lifecyclestage', 'hubspot_owner_id'],
     limit: 1,
   }
 
@@ -51,6 +55,7 @@ export async function searchContactByPhone(
     hs_contact_id: contact.id,
     phone,
     lifecycle_stage: contact.properties?.lifecyclestage ?? null,
+    contact_owner_id: contact.properties?.hubspot_owner_id ?? null,
   }
 }
 

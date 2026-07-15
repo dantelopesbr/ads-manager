@@ -39,14 +39,14 @@ export default async function SemAtendimentoPage() {
   const leads = dedupeByClickId(allConversions).filter(l => l.phone_client)
   const phones = [...new Set(leads.map(l => l.phone_client))] as string[]
 
-  // "Sem atendimento" here means the IA handled the client but nobody was ever
-  // assigned as owner in HubSpot — not "zero contact ever." A missing/null
-  // owner is the handoff-to-human that never happened.
-  const contactByPhone: Record<string, { owner_name: string | null; deal_stage: string | null }> = {}
+  // "Sem atendimento" here means the IA handled the client but "Proprietário
+  // do contato" (the contact's own owner property in HubSpot) is still empty
+  // — not the deal's owner, which can differ or not exist yet.
+  const contactByPhone: Record<string, { contact_owner_name: string | null; deal_stage: string | null }> = {}
   for (let i = 0; i < phones.length; i += 100) {
     const { data } = await supabase
       .from('hubspot_contacts')
-      .select('phone, owner_name, deal_stage')
+      .select('phone, contact_owner_name, deal_stage')
       .in('phone', phones.slice(i, i + 100))
     for (const row of data ?? []) contactByPhone[row.phone] = row
   }
@@ -90,7 +90,7 @@ export default async function SemAtendimentoPage() {
     }
   }
 
-  const unattended = leads.filter(l => !contactByPhone[l.phone_client!]?.owner_name)
+  const unattended = leads.filter(l => !contactByPhone[l.phone_client!]?.contact_owner_name)
 
   function hoursAgo(iso: string) {
     return Math.floor((now.getTime() - new Date(iso).getTime()) / (60 * 60 * 1000))
