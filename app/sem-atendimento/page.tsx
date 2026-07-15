@@ -7,8 +7,12 @@ import { dedupeByClickId } from '@/lib/conversions'
 import { getTeamPhones } from '@/lib/queries'
 import { classifyMessage, buildTeamPhoneIndex, normalizePhoneSuffix } from '@/lib/whatsapp-team'
 import { bucketDealStage } from '@/lib/deal-stages'
+import { batchGetContactsByPhone, fetchOwners } from '@/lib/hubspot/client'
 
 export const dynamic = 'force-dynamic'
+// Hobby plan cap — the live HubSpot re-check below is bounded to the (usually
+// small) unattended candidate list, but give it real headroom regardless.
+export const maxDuration = 60
 
 export default async function SemAtendimentoPage() {
   const supabase = await createClient()
@@ -91,7 +95,44 @@ export default async function SemAtendimentoPage() {
     }
   }
 
-  const unattended = leads.filter(l => !contactByPhone[l.phone_client!]?.contact_owner_name)
+  const candidates = leads.filter(l => !contactByPhone[l.phone_client!]?.contact_owner_name)
+
+  // Live re-check against HubSpot for just this candidate list — the local
+  // cache can lag up to 7 days behind (or longer if the sync batch hasn't
+  // caught up), and showing someone as unattended who's actually already
+  // owned undermines the one thing this page is for. One batch-read round
+  // trip per 100 phones (not one search per phone); also opportunistically
+  // refreshes the cache for anyone the live check finds an owner for.
+  let unattended = candidates
+  if (candidates.length > 0) {
+    const apiKey = process.env.HUBSPOT_API_KEY!
+    const candidatePhones = [...new Set(candidates.map(l => l.phone_client!))]
+    const [owners, liveContacts] = await Promise.all([
+      fetchOwners(apiKey).catch(() => []),
+      batchGetContactsByPhone(candidatePhones, apiKey).catch(() => new Map()),
+    ])
+    const ownerNameById = new Map(owners.map(o => [o.id, o.name]))
+
+    const updates: { phone: string; hs_contact_id: string; lifecycle_stage: string | null; contact_owner_id: string; contact_owner_name: string | null; updated_at: string }[] = []
+    for (const [phone, contact] of liveContacts) {
+      if (!contact.contact_owner_id) continue
+      const contact_owner_name = ownerNameById.get(contact.contact_owner_id) ?? null
+      contactByPhone[phone] = { contact_owner_name, deal_stage: contactByPhone[phone]?.deal_stage ?? null }
+      updates.push({
+        phone,
+        hs_contact_id: contact.hs_contact_id,
+        lifecycle_stage: contact.lifecycle_stage,
+        contact_owner_id: contact.contact_owner_id,
+        contact_owner_name,
+        updated_at: new Date().toISOString(),
+      })
+    }
+    if (updates.length > 0) {
+      await supabase.from('hubspot_contacts').upsert(updates, { onConflict: 'phone' })
+    }
+
+    unattended = candidates.filter(l => !contactByPhone[l.phone_client!]?.contact_owner_name)
+  }
 
   function hoursAgo(iso: string) {
     return Math.floor((now.getTime() - new Date(iso).getTime()) / (60 * 60 * 1000))

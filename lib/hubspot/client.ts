@@ -59,6 +59,47 @@ export async function searchContactByPhone(
   }
 }
 
+/**
+ * Looks up many contacts by phone in one round trip per 100 (HubSpot's batch
+ * limit), instead of one request per phone — used where searchContactByPhone
+ * in a loop would be too slow (e.g. a live re-check across a candidate list).
+ * Phones with no matching contact are simply absent from the returned map.
+ */
+export async function batchGetContactsByPhone(
+  phones: string[],
+  apiKey: string
+): Promise<Map<string, HubSpotContactResult>> {
+  const result = new Map<string, HubSpotContactResult>()
+
+  for (let i = 0; i < phones.length; i += 100) {
+    const chunk = phones.slice(i, i + 100)
+    const body = {
+      idProperty: 'phone',
+      inputs: chunk.map(phone => ({ id: phone })),
+      properties: ['phone', 'lifecyclestage', 'hubspot_owner_id'],
+    }
+
+    const data = await hubspotFetch(
+      '/crm/v3/objects/contacts/batch/read',
+      { method: 'POST', body: JSON.stringify(body) },
+      apiKey
+    )
+
+    for (const contact of data.results ?? []) {
+      const phone: string | undefined = contact.properties?.phone
+      if (!phone) continue
+      result.set(phone, {
+        hs_contact_id: contact.id,
+        phone,
+        lifecycle_stage: contact.properties?.lifecyclestage ?? null,
+        contact_owner_id: contact.properties?.hubspot_owner_id ?? null,
+      })
+    }
+  }
+
+  return result
+}
+
 export async function getTotalDealValue(
   contactId: string,
   apiKey: string
