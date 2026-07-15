@@ -15,8 +15,11 @@ interface LeadRow {
   lifecycle_stage: string | null
   deal_value: number | null
   deal_stage: string | null
+  /** Proprietário do contato (contact owner in HubSpot) — who's attending this client. */
   owner_name: string | null
 }
+
+const SEM_VENDEDOR = 'Sem vendedor'
 
 function DealStageBadge({ stage }: { stage: string | null }) {
   if (!stage) return <span className="text-slate-300 text-xs">—</span>
@@ -33,10 +36,18 @@ export function LeadsTable({ leads }: { leads: LeadRow[] }) {
   const [phone, setPhone] = useState('')
   const [campaign, setCampaign] = useState('')
   const [status, setStatus] = useState('')
+  const [vendor, setVendor] = useState('')
 
   const campaigns = useMemo(() => {
     const names = [...new Set(leads.map(l => l.campaign_name).filter(Boolean))] as string[]
     return names.sort()
+  }, [leads])
+
+  const vendors = useMemo(() => {
+    const names = [...new Set(leads.map(l => l.owner_name).filter(Boolean))] as string[]
+    names.sort()
+    if (leads.some(l => !l.owner_name)) names.push(SEM_VENDEDOR)
+    return names
   }, [leads])
 
   const filtered = useMemo(() => {
@@ -47,11 +58,14 @@ export function LeadsTable({ leads }: { leads: LeadRow[] }) {
         const stages = STATUS_GROUPS[status] ?? []
         if (!l.deal_stage || !stages.includes(l.deal_stage)) return false
       }
+      if (vendor) {
+        if (vendor === SEM_VENDEDOR ? l.owner_name : l.owner_name !== vendor) return false
+      }
       return true
     })
-  }, [leads, phone, campaign, status])
+  }, [leads, phone, campaign, status, vendor])
 
-  const hasFilter = phone || campaign || status
+  const hasFilter = phone || campaign || status || vendor
 
   return (
     <div>
@@ -79,9 +93,17 @@ export function LeadsTable({ leads }: { leads: LeadRow[] }) {
           <option value="">Todos os status</option>
           {Object.keys(STATUS_GROUPS).map(s => <option key={s} value={s}>{s}</option>)}
         </select>
+        <select
+          value={vendor}
+          onChange={e => setVendor(e.target.value)}
+          className="border rounded-md px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
+        >
+          <option value="">Todos os vendedores</option>
+          {vendors.map(v => <option key={v} value={v}>{v}</option>)}
+        </select>
         {hasFilter && (
           <button
-            onClick={() => { setPhone(''); setCampaign(''); setStatus('') }}
+            onClick={() => { setPhone(''); setCampaign(''); setStatus(''); setVendor('') }}
             className="px-3 py-1.5 rounded-md text-xs text-slate-500 border hover:bg-slate-50 transition-colors"
           >
             Limpar

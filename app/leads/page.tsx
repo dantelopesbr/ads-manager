@@ -47,11 +47,11 @@ export default async function LeadsPage({
 
   const phones = [...new Set(conversions.map(c => c.phone_client).filter(Boolean))] as string[]
   const BATCH = 100
-  const contactRows: { phone: string; lifecycle_stage: string | null; deal_value: number | null; deal_stage: string | null; owner_name: string | null }[] = []
+  const contactRows: { phone: string; lifecycle_stage: string | null; deal_value: number | null; deal_stage: string | null; contact_owner_name: string | null }[] = []
   for (let i = 0; i < phones.length; i += BATCH) {
     const { data } = await supabase
       .from('hubspot_contacts')
-      .select('phone, lifecycle_stage, deal_value, deal_stage, owner_name')
+      .select('phone, lifecycle_stage, deal_value, deal_stage, contact_owner_name')
       .in('phone', phones.slice(i, i + BATCH))
     if (data) contactRows.push(...data)
   }
@@ -60,12 +60,15 @@ export default async function LeadsPage({
     contactRows.map(c => [c.phone, c])
   )
 
+  // "Vendedor" here is contact_owner_name (Proprietário do contato) — who's
+  // actually assigned to this client — not the deal owner, which can lag or
+  // differ (see Sem Atendimento).
   const leads = (conversions ?? []).map(c => ({
     ...c,
     lifecycle_stage: contactByPhone[c.phone_client ?? '']?.lifecycle_stage ?? null,
     deal_value: contactByPhone[c.phone_client ?? '']?.deal_value ?? null,
     deal_stage: contactByPhone[c.phone_client ?? '']?.deal_stage ?? null,
-    owner_name: contactByPhone[c.phone_client ?? '']?.owner_name ?? null,
+    owner_name: contactByPhone[c.phone_client ?? '']?.contact_owner_name ?? null,
   }))
 
   const label = since
