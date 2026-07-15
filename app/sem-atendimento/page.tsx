@@ -39,7 +39,9 @@ export default async function SemAtendimentoPage() {
   const leads = dedupeByClickId(allConversions).filter(l => l.phone_client)
   const phones = [...new Set(leads.map(l => l.phone_client))] as string[]
 
-  // Context for display: current CRM state (not used to decide attendance)
+  // "Sem atendimento" here means the IA handled the client but nobody was ever
+  // assigned as owner in HubSpot — not "zero contact ever." A missing/null
+  // owner is the handoff-to-human that never happened.
   const contactByPhone: Record<string, { owner_name: string | null; deal_stage: string | null }> = {}
   for (let i = 0; i < phones.length; i += 100) {
     const { data } = await supabase
@@ -49,22 +51,17 @@ export default async function SemAtendimentoPage() {
     for (const row of data ?? []) contactByPhone[row.phone] = row
   }
 
-  // Attendance signal 1: any call logged for this phone
-  const callAtByPhone: Record<string, string[]> = {}
+  // Context columns only (not used to decide inclusion): did anyone reach out already?
+  const calledPhones = new Set<string>()
   for (let i = 0; i < phones.length; i += 100) {
     const { data } = await supabase
       .from('hubspot_calls')
-      .select('phone, call_at')
+      .select('phone')
       .in('phone', phones.slice(i, i + 100))
-    for (const row of data ?? []) {
-      if (!callAtByPhone[row.phone]) callAtByPhone[row.phone] = []
-      callAtByPhone[row.phone].push(row.call_at)
-    }
+    for (const row of data ?? []) calledPhones.add(row.phone)
   }
 
-  // Attendance signal 2: any team/bot-sent WhatsApp message — Fratelli House only,
-  // there's no per-message log for FratelliRev yet.
-  const messageAtByPhone: Record<string, string[]> = {}
+  const iaRepliedPhones = new Set<string>()
   let whatsappAvailable = false
   if (account === 'fratellihouse' && phones.length > 0) {
     whatsappAvailable = true
@@ -73,11 +70,11 @@ export default async function SemAtendimentoPage() {
     const sinceStr = format(cutoffOld, 'yyyy-MM-dd')
     const untilStr = format(now, 'yyyy-MM-dd')
     const phoneSet = new Set(phones)
-    const msgs: { phone: string | null; phone_fratelli: string | null; source: string | null; created_at: string }[] = []
+    const msgs: { phone: string | null; phone_fratelli: string | null; source: string | null }[] = []
     for (let page = 0; ; page++) {
       const { data } = await supabase
         .from('[FH]conversation_Whatsapp')
-        .select('phone, phone_fratelli, source, created_at')
+        .select('phone, phone_fratelli, source')
         .gte('created_at', sinceStr)
         .lte('created_at', `${untilStr}T23:59:59`)
         .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
@@ -89,18 +86,11 @@ export default async function SemAtendimentoPage() {
       if (!m.phone || !phoneSet.has(m.phone)) continue
       const teamLabel = teamIndex.get(normalizePhoneSuffix(m.phone_fratelli) ?? '') ?? null
       const classified = classifyMessage(m.source, teamLabel)
-      if (classified.type !== 'vendedor' && classified.type !== 'ia') continue
-      if (!messageAtByPhone[m.phone]) messageAtByPhone[m.phone] = []
-      messageAtByPhone[m.phone].push(m.created_at)
+      if (classified.type === 'ia') iaRepliedPhones.add(m.phone)
     }
   }
 
-  const unattended = leads.filter(l => {
-    const phone = l.phone_client!
-    const attendedByCall = (callAtByPhone[phone] ?? []).some(t => t >= l.created_at)
-    const attendedByMessage = (messageAtByPhone[phone] ?? []).some(t => t >= l.created_at)
-    return !attendedByCall && !attendedByMessage
-  })
+  const unattended = leads.filter(l => !contactByPhone[l.phone_client!]?.owner_name)
 
   function hoursAgo(iso: string) {
     return Math.floor((now.getTime() - new Date(iso).getTime()) / (60 * 60 * 1000))
@@ -120,11 +110,11 @@ export default async function SemAtendimentoPage() {
         )}
         {!whatsappAvailable && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
-            {ACCOUNTS[account].label} não tem WhatsApp rastreado — atendimento aqui considera só ligações.
+            {ACCOUNTS[account].label} não tem WhatsApp rastreado — coluna “IA respondeu” não disponível aqui.
           </p>
         )}
         <p className="text-sm text-slate-500 mb-6">
-          Leads entre 24h e 7 dias, sem ligação nem mensagem do time depois que viraram lead · {unattended.length} de {leads.length}
+          Leads entre 24h e 7 dias sem vendedor definido no HubSpot (atendidos pela IA mas não transferidos) · {unattended.length} de {leads.length}
         </p>
 
         <div className="bg-white rounded-xl border p-6">
@@ -134,8 +124,9 @@ export default async function SemAtendimentoPage() {
                 <tr className="border-b text-slate-500 text-left">
                   <th className="pb-3 pr-4 font-medium">Telefone</th>
                   <th className="pb-3 pr-4 font-medium">Campanha</th>
-                  <th className="pb-3 pr-4 font-medium">Vendedor (CRM)</th>
-                  <th className="pb-3 pr-4 font-medium">Status</th>
+                  <th className="pb-3 pr-4 font-medium">IA respondeu</th>
+                  <th className="pb-3 pr-4 font-medium">Teve ligação</th>
+                  <th className="pb-3 pr-4 font-medium">Status (CRM)</th>
                   <th className="pb-3 font-medium text-right">Há quanto tempo</th>
                 </tr>
               </thead>
@@ -144,14 +135,25 @@ export default async function SemAtendimentoPage() {
                   <tr key={l.id} className="border-b hover:bg-slate-50">
                     <td className="py-3 pr-4 font-mono text-xs">{l.phone_client}</td>
                     <td className="py-3 pr-4">{l.campaign_name ?? '—'}</td>
-                    <td className="py-3 pr-4 text-slate-500">{contactByPhone[l.phone_client!]?.owner_name ?? <span className="text-slate-300">sem match</span>}</td>
+                    <td className="py-3 pr-4">
+                      {whatsappAvailable
+                        ? (iaRepliedPhones.has(l.phone_client!)
+                          ? <span className="text-emerald-700">Sim</span>
+                          : <span className="text-slate-300">Não</span>)
+                        : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="py-3 pr-4">
+                      {calledPhones.has(l.phone_client!)
+                        ? <span className="text-emerald-700">Sim</span>
+                        : <span className="text-slate-300">Não</span>}
+                    </td>
                     <td className="py-3 pr-4 text-slate-500">{contactByPhone[l.phone_client!]?.deal_stage ?? '—'}</td>
                     <td className="py-3 text-right font-medium text-red-600">há {hoursAgo(l.created_at)}h</td>
                   </tr>
                 ))}
                 {unattended.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-slate-400 text-sm">Ninguém ficou sem atendimento nesse período</td>
+                    <td colSpan={6} className="py-8 text-center text-slate-400 text-sm">Todo mundo desse período já tem vendedor definido</td>
                   </tr>
                 )}
               </tbody>
