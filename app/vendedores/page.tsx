@@ -195,7 +195,7 @@ export default async function VendedoresPage({
         {messagesChartData.length > 0 && (
           <div className="bg-white rounded-xl border p-6 mt-6">
             <h4 className="text-sm font-semibold mb-4 text-slate-600">Conversas iniciadas por dia (contatos distintos)</h4>
-            <ActivityChart data={messagesChartData} vendors={messagesChartVendors} />
+            <ActivityChart data={messagesChartData} vendors={messagesChartVendors} target={35} />
           </div>
         )}
 
@@ -229,7 +229,7 @@ export default async function VendedoresPage({
         {callsChartData.length > 0 && (
           <div className="bg-white rounded-xl border p-6 mt-6">
             <h4 className="text-sm font-semibold mb-4 text-slate-600">Ligações por dia</h4>
-            <ActivityChart data={callsChartData} vendors={callsChartVendors} />
+            <ActivityChart data={callsChartData} vendors={callsChartVendors} target={20} />
           </div>
         )}
       </main>

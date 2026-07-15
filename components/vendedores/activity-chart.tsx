@@ -1,10 +1,10 @@
 'use client'
 
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts'
 
 // Fixed order, never reassigned by rank — identity color, not status. Distinct
 // from the emerald/red/amber already used for won/lost/warning elsewhere in
-// this app, so a line here never reads as a status signal.
+// this app, so a bar here never reads as a status signal.
 const KNOWN_COLORS: Record<string, string> = {
   Dante: '#2a78d6',
   Wakilla: '#4a3aa7',
@@ -24,7 +24,14 @@ interface ChartPoint {
   [vendor: string]: string | number
 }
 
-export function ActivityChart({ data, vendors }: { data: ChartPoint[]; vendors: string[] }) {
+interface Props {
+  data: ChartPoint[]
+  vendors: string[]
+  /** Daily target per vendor — drawn as a dashed reference line. */
+  target?: number
+}
+
+export function ActivityChart({ data, vendors, target }: Props) {
   let fallbackIndex = 0
   const colorFor = (vendor: string) => {
     if (KNOWN_COLORS[vendor]) return KNOWN_COLORS[vendor]
@@ -35,23 +42,31 @@ export function ActivityChart({ data, vendors }: { data: ChartPoint[]; vendors: 
 
   return (
     <ResponsiveContainer width="100%" height={260}>
-      <LineChart data={data}>
+      <BarChart data={data}>
         <XAxis dataKey="date" tick={{ fontSize: 11 }} />
         <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
         <Tooltip />
         <Legend />
         {vendors.map(vendor => (
-          <Line
+          <Bar
             key={vendor}
-            type="monotone"
             dataKey={vendor}
-            stroke={colorFor(vendor)}
-            strokeWidth={2}
-            dot={false}
+            fill={colorFor(vendor)}
             name={vendor}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={24}
           />
         ))}
-      </LineChart>
+        {target !== undefined && (
+          <ReferenceLine
+            y={target}
+            stroke="#52514e"
+            strokeDasharray="4 4"
+            strokeWidth={1.5}
+            label={{ value: `Meta: ${target}`, position: 'insideTopRight', fontSize: 11, fill: '#52514e' }}
+          />
+        )}
+      </BarChart>
     </ResponsiveContainer>
   )
 }
