@@ -6,6 +6,7 @@ import { ACCOUNTS } from '@/lib/account'
 import { dedupeByClickId } from '@/lib/conversions'
 import { getTeamPhones } from '@/lib/queries'
 import { classifyMessage, buildTeamPhoneIndex, normalizePhoneSuffix } from '@/lib/whatsapp-team'
+import { bucketDealStage } from '@/lib/deal-stages'
 
 export const dynamic = 'force-dynamic'
 
@@ -126,7 +127,8 @@ export default async function SemAtendimentoPage() {
                   <th className="pb-3 pr-4 font-medium">Campanha</th>
                   <th className="pb-3 pr-4 font-medium">IA respondeu</th>
                   <th className="pb-3 pr-4 font-medium">Teve ligação</th>
-                  <th className="pb-3 pr-4 font-medium">Status (CRM)</th>
+                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
+                  <th className="pb-3 pr-4 font-medium">Status</th>
                   <th className="pb-3 font-medium text-right">Há quanto tempo</th>
                 </tr>
               </thead>
@@ -147,13 +149,16 @@ export default async function SemAtendimentoPage() {
                         ? <span className="text-emerald-700">Sim</span>
                         : <span className="text-slate-300">Não</span>}
                     </td>
-                    <td className="py-3 pr-4 text-slate-500">{contactByPhone[l.phone_client!]?.deal_stage ?? '—'}</td>
+                    <td className="py-3 pr-4 text-slate-500">
+                      {contactByPhone[l.phone_client!]?.contact_owner_name ?? <span className="text-slate-300">sem vendedor</span>}
+                    </td>
+                    <td className="py-3 pr-4 text-slate-500">{bucketDealStage(contactByPhone[l.phone_client!]?.deal_stage ?? null)}</td>
                     <td className="py-3 text-right font-medium text-red-600">há {hoursAgo(l.created_at)}h</td>
                   </tr>
                 ))}
                 {unattended.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-400 text-sm">Todo mundo desse período já tem vendedor definido</td>
+                    <td colSpan={7} className="py-8 text-center text-slate-400 text-sm">Todo mundo desse período já tem vendedor definido</td>
                   </tr>
                 )}
               </tbody>
