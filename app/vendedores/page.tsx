@@ -59,9 +59,12 @@ export default async function VendedoresPage({
     .map(name => ({ name, contacts: contactsByVendor[name]?.size ?? 0, messages: messageCountByVendor[name] ?? 0 }))
     .sort((a, b) => b.contacts - a.contacts)
   const messagesChartVendors = [...KNOWN_VENDORS, ...IA_VENDORS].filter(v => messageCountByVendor[v] > 0)
+  // Fill 0 for every vendor on every day (not just days they have data) — a
+  // missing key reads as undefined to Recharts, which breaks the line into
+  // isolated dots instead of drawing it through the gap.
   const messagesChartData = Object.keys(dailyContactsByVendor).sort().map(day => {
     const row: { date: string; [vendor: string]: string | number } = { date: day }
-    for (const [vendor, set] of Object.entries(dailyContactsByVendor[day])) row[vendor] = set.size
+    for (const vendor of messagesChartVendors) row[vendor] = dailyContactsByVendor[day][vendor]?.size ?? 0
     return row
   })
 
@@ -82,7 +85,11 @@ export default async function VendedoresPage({
     .map(name => ({ name, contacts: callContactsByOwner[name].size, calls: callCountByOwner[name] ?? 0 }))
     .sort((a, b) => b.contacts - a.contacts)
   const callsChartVendors = Object.keys(callContactsByOwner)
-  const callsChartData = Object.keys(dailyByCallOwner).sort().map(day => ({ date: day, ...dailyByCallOwner[day] }))
+  const callsChartData = Object.keys(dailyByCallOwner).sort().map(day => {
+    const row: { date: string; [vendor: string]: string | number } = { date: day }
+    for (const vendor of callsChartVendors) row[vendor] = dailyByCallOwner[day][vendor] ?? 0
+    return row
+  })
 
   type OwnerAgg = { leads: number; deals: number; won: number; valueProjected: number; valueWon: number }
   const byOwner: Record<string, OwnerAgg> = {}
