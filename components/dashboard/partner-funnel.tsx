@@ -10,13 +10,18 @@ function hubspotUrl(contactId: string) {
   return `https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/record/0-1/${contactId}`
 }
 
-function PartnerList({ partners }: { partners: PartnerCurrent[] }) {
+function PartnerList({ partners, ownerNameById }: { partners: PartnerCurrent[]; ownerNameById: Record<string, string> }) {
   const sorted = [...partners].sort((a, b) => (b.dias_desde_contato ?? 0) - (a.dias_desde_contato ?? 0))
   return (
     <div className="border rounded-lg divide-y bg-slate-50 mt-2">
       {sorted.map(p => (
         <div key={p.contact_id} className="flex items-center justify-between px-4 py-2.5 text-sm">
-          <span className="font-medium text-slate-700">{p.nome ?? '—'}</span>
+          <div>
+            <span className="font-medium text-slate-700">{p.nome ?? '—'}</span>
+            <span className="text-xs text-slate-400 ml-2">
+              {p.owner_id ? (ownerNameById[p.owner_id] ?? 'dono desconhecido') : 'sem dono'}
+            </span>
+          </div>
           <div className="flex items-center gap-4">
             <span className="text-xs text-slate-500">
               {p.dias_desde_contato != null ? `há ${p.dias_desde_contato}d sem contato` : '—'}
@@ -39,7 +44,7 @@ function PartnerList({ partners }: { partners: PartnerCurrent[] }) {
   )
 }
 
-export function PartnerFunnel({ partners }: { partners: PartnerCurrent[] }) {
+export function PartnerFunnel({ partners, ownerNameById }: { partners: PartnerCurrent[]; ownerNameById: Record<string, string> }) {
   const [selected, setSelected] = useState<ParceiroEstagio | null>(null)
 
   const byStage: Record<string, PartnerCurrent[]> = {}
@@ -114,7 +119,7 @@ export function PartnerFunnel({ partners }: { partners: PartnerCurrent[] }) {
           <p className="text-sm font-semibold text-slate-600 mb-1">
             {PARCEIRO_ESTAGIO_LABELS[selected]} · {countOf(selected)}
           </p>
-          <PartnerList partners={byStage[selected] ?? []} />
+          <PartnerList partners={byStage[selected] ?? []} ownerNameById={ownerNameById} />
         </div>
       )}
     </div>

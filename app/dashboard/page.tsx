@@ -15,6 +15,7 @@ import {
   type DailySpend, type DailyLeads, type DealTotals,
 } from '@/lib/queries'
 import { getResumoDiario, getAtividadeLog, getParceiroStatusLog, getPartnerCurrentStatus } from '@/lib/atividade-comercial'
+import { fetchOwners } from '@/lib/hubspot/client'
 import { VendorActivityCards } from '@/components/dashboard/vendor-activity-cards'
 import { VendorActivityLog } from '@/components/dashboard/vendor-activity-log'
 import { PartnerStageChart } from '@/components/dashboard/partner-stage-chart'
@@ -57,7 +58,7 @@ export default async function DashboardPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [current, previous, target, leadStages, resumoDiario, atividadeLog, parceiroStatusLog, partnerCurrent] = await Promise.all([
+  const [current, previous, target, leadStages, resumoDiario, atividadeLog, parceiroStatusLog, partnerCurrent, owners] = await Promise.all([
     getDashboardPeriodData(supabase, accountKeys, since, until),
     getDashboardPeriodData(supabase, accountKeys, prevSince, prevUntil),
     selection === 'all' ? Promise.resolve({ cpl_target: null, roas_target: null }) : getAccountTarget(supabase, selection),
@@ -66,7 +67,9 @@ export default async function DashboardPage({
     getAtividadeLog(supabase, since, until),
     getParceiroStatusLog(supabase, since, until),
     getPartnerCurrentStatus(supabase),
+    fetchOwners(process.env.HUBSPOT_API_KEY!).catch(() => []),
   ])
+  const ownerNameById = Object.fromEntries(owners.map(o => [o.id, o.name]))
 
   const funnelCounts: Partial<Record<FunnelBucket, number>> = {}
   for (const l of leadStages) {
@@ -169,7 +172,7 @@ export default async function DashboardPage({
         <div className="bg-white rounded-xl border p-6">
           <h4 className="text-sm font-semibold mb-1 text-slate-600">Funil de Parceiros</h4>
           <p className="text-xs text-slate-400 mb-4">Estado atual · {partnerCurrent.length} parceiros rastreados</p>
-          <PartnerFunnel partners={partnerCurrent} />
+          <PartnerFunnel partners={partnerCurrent} ownerNameById={ownerNameById} />
         </div>
       </main>
     </div>
