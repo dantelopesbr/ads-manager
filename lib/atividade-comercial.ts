@@ -75,6 +75,11 @@ export const PARCEIRO_ESTAGIOS: ParceiroEstagio[] = [
   'novo_parceiro', 'em_aquecimento', 'ativo', 'parceiro_chave', 'esfriando', 'abandonado', 'inativo',
 ]
 
+// Growth track (ordered, funnel-style) vs. risk/lost group — not a single
+// linear sequence, "esfriando" etc. don't follow from "parceiro_chave".
+export const PARCEIRO_GROWTH_STAGES: ParceiroEstagio[] = ['novo_parceiro', 'em_aquecimento', 'ativo', 'parceiro_chave']
+export const PARCEIRO_RISK_STAGES: ParceiroEstagio[] = ['esfriando', 'abandonado', 'inativo']
+
 export const PARCEIRO_ESTAGIO_LABELS: Record<ParceiroEstagio, string> = {
   novo_parceiro: 'Novo parceiro',
   em_aquecimento: 'Em aquecimento',
@@ -85,15 +90,53 @@ export const PARCEIRO_ESTAGIO_LABELS: Record<ParceiroEstagio, string> = {
   inativo: 'Inativo',
 }
 
-// Fixed order/colors — a dual track: growing engagement (blue -> green ->
-// violet) vs. declining (amber -> red -> gray), not a single linear ramp,
-// since "em_aquecimento" (warming up) is a good sign, not a warning.
+// Two tracks, not a single linear ramp: growth (blue -> green) vs. risk
+// (amber -> red -> gray) — "em_aquecimento" (warming up) is a good sign,
+// not a warning, so it doesn't share the risk track's hues.
 export const PARCEIRO_ESTAGIO_COLORS: Record<ParceiroEstagio, string> = {
-  novo_parceiro: '#94a3b8',
-  em_aquecimento: '#60a5fa',
-  ativo: '#34d399',
-  parceiro_chave: '#a78bfa',
+  novo_parceiro: '#93c5fd',
+  em_aquecimento: '#3b82f6',
+  ativo: '#4ade80',
+  parceiro_chave: '#16a34a',
   esfriando: '#fbbf24',
-  abandonado: '#f87171',
-  inativo: '#64748b',
+  abandonado: '#ef4444',
+  inativo: '#94a3b8',
+}
+
+// This business's HubSpot portal id, for direct contact-record links.
+export const HUBSPOT_PORTAL_ID = '5529297'
+
+export interface PartnerCurrent {
+  contact_id: string
+  nome: string | null
+  owner_id: string | null
+  estagio: ParceiroEstagio
+  negocios_fechados: number | null
+  dias_desde_contato: number | null
+  data_snapshot: string
+}
+
+/**
+ * Current state per partner — the log has one row per contact per day, so
+ * this keeps only each contact_id's most recent snapshot. Reduced in JS
+ * rather than a SQL DISTINCT ON/window function to avoid a new RPC for a
+ * dataset this small (a few hundred partners at most).
+ */
+export async function getPartnerCurrentStatus(supabase: SupabaseClient): Promise<PartnerCurrent[]> {
+  const lookback = new Date()
+  lookback.setDate(lookback.getDate() - 35)
+  const lookbackStr = lookback.toISOString().split('T')[0]
+
+  const { data, error } = await supabase
+    .from('[FH]parceiro_status_log')
+    .select('contact_id, nome, owner_id, estagio, negocios_fechados, dias_desde_contato, data_snapshot')
+    .gte('data_snapshot', lookbackStr)
+    .order('data_snapshot', { ascending: false })
+  if (error) throw error
+
+  const latestByContact = new Map<string, PartnerCurrent>()
+  for (const row of data ?? []) {
+    if (!latestByContact.has(row.contact_id)) latestByContact.set(row.contact_id, row)
+  }
+  return [...latestByContact.values()]
 }

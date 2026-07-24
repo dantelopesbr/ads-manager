@@ -14,10 +14,11 @@ import {
   getDashboardPeriodData, getAccountTarget, getDashboardLeadStages,
   type DailySpend, type DailyLeads, type DealTotals,
 } from '@/lib/queries'
-import { getResumoDiario, getAtividadeLog, getParceiroStatusLog } from '@/lib/atividade-comercial'
+import { getResumoDiario, getAtividadeLog, getParceiroStatusLog, getPartnerCurrentStatus } from '@/lib/atividade-comercial'
 import { VendorActivityCards } from '@/components/dashboard/vendor-activity-cards'
 import { VendorActivityLog } from '@/components/dashboard/vendor-activity-log'
 import { PartnerStageChart } from '@/components/dashboard/partner-stage-chart'
+import { PartnerFunnel } from '@/components/dashboard/partner-funnel'
 
 export const dynamic = 'force-dynamic'
 
@@ -56,7 +57,7 @@ export default async function DashboardPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [current, previous, target, leadStages, resumoDiario, atividadeLog, parceiroStatusLog] = await Promise.all([
+  const [current, previous, target, leadStages, resumoDiario, atividadeLog, parceiroStatusLog, partnerCurrent] = await Promise.all([
     getDashboardPeriodData(supabase, accountKeys, since, until),
     getDashboardPeriodData(supabase, accountKeys, prevSince, prevUntil),
     selection === 'all' ? Promise.resolve({ cpl_target: null, roas_target: null }) : getAccountTarget(supabase, selection),
@@ -64,6 +65,7 @@ export default async function DashboardPage({
     getResumoDiario(supabase, since, until),
     getAtividadeLog(supabase, since, until),
     getParceiroStatusLog(supabase, since, until),
+    getPartnerCurrentStatus(supabase),
   ])
 
   const funnelCounts: Partial<Record<FunnelBucket, number>> = {}
@@ -159,9 +161,15 @@ export default async function DashboardPage({
           <VendorActivityLog rows={atividadeLog} />
         </div>
 
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-xl border p-6 mb-8">
           <h4 className="text-sm font-semibold mb-4 text-slate-600">Estágio dos Parceiros · {periodLabel}</h4>
           <PartnerStageChart rows={parceiroStatusLog} />
+        </div>
+
+        <div className="bg-white rounded-xl border p-6">
+          <h4 className="text-sm font-semibold mb-1 text-slate-600">Funil de Parceiros</h4>
+          <p className="text-xs text-slate-400 mb-4">Estado atual · {partnerCurrent.length} parceiros rastreados</p>
+          <PartnerFunnel partners={partnerCurrent} />
         </div>
       </main>
     </div>
