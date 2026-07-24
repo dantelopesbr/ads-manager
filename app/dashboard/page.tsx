@@ -14,6 +14,10 @@ import {
   getDashboardPeriodData, getAccountTarget, getDashboardLeadStages,
   type DailySpend, type DailyLeads, type DealTotals,
 } from '@/lib/queries'
+import { getResumoDiario, getAtividadeLog, getParceiroStatusLog } from '@/lib/atividade-comercial'
+import { VendorActivityCards } from '@/components/dashboard/vendor-activity-cards'
+import { VendorActivityLog } from '@/components/dashboard/vendor-activity-log'
+import { PartnerStageChart } from '@/components/dashboard/partner-stage-chart'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,11 +56,14 @@ export default async function DashboardPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [current, previous, target, leadStages] = await Promise.all([
+  const [current, previous, target, leadStages, resumoDiario, atividadeLog, parceiroStatusLog] = await Promise.all([
     getDashboardPeriodData(supabase, accountKeys, since, until),
     getDashboardPeriodData(supabase, accountKeys, prevSince, prevUntil),
     selection === 'all' ? Promise.resolve({ cpl_target: null, roas_target: null }) : getAccountTarget(supabase, selection),
     getDashboardLeadStages(supabase, accountKeys, since, until),
+    getResumoDiario(supabase, since, until),
+    getAtividadeLog(supabase, since, until),
+    getParceiroStatusLog(supabase, since, until),
   ])
 
   const funnelCounts: Partial<Record<FunnelBucket, number>> = {}
@@ -135,9 +142,26 @@ export default async function DashboardPage({
           <h3 className="text-sm font-semibold mb-4 text-slate-600">Leads + Spend · {periodLabel}</h3>
           <PerformanceChart data={chartData} />
         </div>
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-xl border p-6 mb-8">
           <h3 className="text-sm font-semibold mb-4 text-slate-600">Funil de Vendas · {periodLabel}</h3>
           <FunnelChart counts={funnelCounts} total={leadStages.length} />
+        </div>
+
+        <h3 className="text-lg font-bold mb-4">Atividade Comercial</h3>
+
+        <h4 className="text-sm font-semibold mb-3 text-slate-600">Atividade por vendedor · {periodLabel}</h4>
+        <div className="mb-8">
+          <VendorActivityCards rows={resumoDiario} />
+        </div>
+
+        <h4 className="text-sm font-semibold mb-3 text-slate-600">Conversas · {periodLabel}</h4>
+        <div className="mb-8">
+          <VendorActivityLog rows={atividadeLog} />
+        </div>
+
+        <div className="bg-white rounded-xl border p-6">
+          <h4 className="text-sm font-semibold mb-4 text-slate-600">Estágio dos Parceiros · {periodLabel}</h4>
+          <PartnerStageChart rows={parceiroStatusLog} />
         </div>
       </main>
     </div>
