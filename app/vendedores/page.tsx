@@ -9,6 +9,9 @@ import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
 import { getOwnerBreakdown, getWhatsappMessages, getTeamPhones, getCalls } from '@/lib/queries'
 import { classifyMessage, buildTeamPhoneIndex, normalizePhoneSuffix, KNOWN_VENDORS, IA_VENDORS } from '@/lib/whatsapp-team'
 import { ActivityChart } from '@/components/vendedores/activity-chart'
+import { FUNNEL_STAGES, bucketDealStage, type FunnelBucket } from '@/lib/deal-stages'
+import { getPartnerCurrentStatus, PARCEIRO_ESTAGIOS, PARCEIRO_ESTAGIO_LABELS, type ParceiroEstagio } from '@/lib/atividade-comercial'
+import { fetchOwners } from '@/lib/hubspot/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,12 +32,15 @@ export default async function VendedoresPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [rows, messages, teamPhones, calls] = await Promise.all([
+  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners] = await Promise.all([
     getOwnerBreakdown(supabase, accountKeys, since, until),
     getWhatsappMessages(supabase, since, until),
     getTeamPhones(supabase),
     getCalls(supabase, since, until),
+    getPartnerCurrentStatus(supabase),
+    fetchOwners(process.env.HUBSPOT_API_KEY!).catch(() => []),
   ])
+  const ownerNameById = Object.fromEntries(hubspotOwners.map(o => [o.id, o.name]))
 
   const teamIndex = buildTeamPhoneIndex(teamPhones)
   const contactsByVendor: Record<string, Set<string>> = {}
@@ -114,6 +120,33 @@ export default async function VendedoresPage({
   const totalLeads = owners.reduce((s, o) => s + o.leads, 0)
   const periodLabel = `${since} → ${until}`
 
+  // Funil de vendas por vendedor — same buckets as the Dashboard's aggregate
+  // funnel, broken out per owner. Quantidade de orçamentos = "Orçamento" column.
+  const funnelByOwner: Record<string, Partial<Record<FunnelBucket, number>>> = {}
+  for (const r of rows) {
+    const owner = r.owner_name ?? SEM_VENDEDOR
+    if (!funnelByOwner[owner]) funnelByOwner[owner] = {}
+    const bucket = bucketDealStage(r.deal_stage)
+    funnelByOwner[owner][bucket] = (funnelByOwner[owner][bucket] ?? 0) + 1
+  }
+  const salesFunnelOwners = Object.keys(funnelByOwner).sort(
+    (a, b) => (byOwner[b]?.leads ?? 0) - (byOwner[a]?.leads ?? 0)
+  )
+
+  // Funil de parceiros por vendedor — current stage per partner, grouped by
+  // owner (resolved via HubSpot owner_id -> name).
+  const partnerFunnelByOwner: Record<string, Partial<Record<ParceiroEstagio, number>>> = {}
+  for (const p of partnerCurrent) {
+    const owner = (p.owner_id ? ownerNameById[p.owner_id] : null) ?? SEM_VENDEDOR
+    if (!partnerFunnelByOwner[owner]) partnerFunnelByOwner[owner] = {}
+    partnerFunnelByOwner[owner][p.estagio] = (partnerFunnelByOwner[owner][p.estagio] ?? 0) + 1
+  }
+  const partnerOwnerTotal = (owner: string) =>
+    Object.values(partnerFunnelByOwner[owner] ?? {}).reduce((s, n) => s + (n ?? 0), 0)
+  const partnerFunnelOwners = Object.keys(partnerFunnelByOwner).sort(
+    (a, b) => partnerOwnerTotal(b) - partnerOwnerTotal(a)
+  )
+
   return (
     <div className="flex">
       <Nav />
@@ -162,6 +195,76 @@ export default async function VendedoresPage({
                 {owners.length === 0 && (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-slate-400 text-sm">Nenhum lead no período</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Vendas por Vendedor · {periodLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">Coluna &quot;Orçamento&quot; = quantidade de orçamentos em aberto por vendedor.</p>
+        <div className="bg-white rounded-xl border p-6">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-slate-500 text-left">
+                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
+                  {FUNNEL_STAGES.map(s => (
+                    <th key={s.bucket} className="pb-3 pr-4 font-medium text-right">{s.bucket}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {salesFunnelOwners.map(owner => (
+                  <tr key={owner} className="border-b last:border-0 hover:bg-slate-50">
+                    <td className={`py-2.5 pr-4 ${owner === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>{owner}</td>
+                    {FUNNEL_STAGES.map(s => (
+                      <td key={s.bucket} className={`py-2.5 pr-4 text-right ${s.bucket === 'Orçamento' ? 'font-semibold text-amber-700' : 'text-slate-600'}`}>
+                        {funnelByOwner[owner][s.bucket] ?? 0}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {salesFunnelOwners.length === 0 && (
+                  <tr>
+                    <td colSpan={FUNNEL_STAGES.length + 1} className="py-6 text-center text-slate-400 text-sm">Nenhum lead no período</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Parceiros por Vendedor</h3>
+        <p className="text-xs text-slate-400 mb-4">Estado atual dos parceiros (últimos 35 dias), agrupado pelo dono no HubSpot.</p>
+        <div className="bg-white rounded-xl border p-6">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-slate-500 text-left">
+                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
+                  {PARCEIRO_ESTAGIOS.map(estagio => (
+                    <th key={estagio} className="pb-3 pr-4 font-medium text-right whitespace-nowrap">{PARCEIRO_ESTAGIO_LABELS[estagio]}</th>
+                  ))}
+                  <th className="pb-3 font-medium text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {partnerFunnelOwners.map(owner => (
+                  <tr key={owner} className="border-b last:border-0 hover:bg-slate-50">
+                    <td className={`py-2.5 pr-4 ${owner === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>{owner}</td>
+                    {PARCEIRO_ESTAGIOS.map(estagio => (
+                      <td key={estagio} className="py-2.5 pr-4 text-right text-slate-600">
+                        {partnerFunnelByOwner[owner][estagio] ?? 0}
+                      </td>
+                    ))}
+                    <td className="py-2.5 text-right font-medium">{partnerOwnerTotal(owner)}</td>
+                  </tr>
+                ))}
+                {partnerFunnelOwners.length === 0 && (
+                  <tr>
+                    <td colSpan={PARCEIRO_ESTAGIOS.length + 2} className="py-6 text-center text-slate-400 text-sm">Nenhum parceiro rastreado</td>
                   </tr>
                 )}
               </tbody>
