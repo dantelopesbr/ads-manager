@@ -7,6 +7,8 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'ADS Manager',
   description: 'Gestão de anúncios Meta Ads',
+  // Internal tool with lead/revenue data — never indexed or crawlable.
+  robots: { index: false, follow: false, nocache: true },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
