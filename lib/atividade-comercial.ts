@@ -6,9 +6,18 @@ import { SupabaseClient } from '@supabase/supabase-js'
 export interface ResumoDiarioRow {
   vendedor: string
   data_atividade: string
+  // Combined totals — fornecedor already excluded from both, kept for
+  // whatever still reads the un-split numbers (e.g. the weekly scorecard).
   total_conversas_whatsapp: number
   total_ligacoes: number
   ligacoes_detalhe: Record<string, number> | null
+  // Cliente/parceiro split (fornecedor excluded from both sides too).
+  total_conversas_cliente: number
+  total_conversas_parceiro: number
+  total_ligacoes_cliente: number
+  total_ligacoes_parceiro: number
+  ligacoes_detalhe_cliente: Record<string, number> | null
+  ligacoes_detalhe_parceiro: Record<string, number> | null
 }
 
 export async function getResumoDiario(
@@ -16,12 +25,19 @@ export async function getResumoDiario(
 ): Promise<ResumoDiarioRow[]> {
   const { data, error } = await supabase
     .from('[FH]atividade_vendedor_resumo_diario')
-    .select('vendedor, data_atividade, total_conversas_whatsapp, total_ligacoes, ligacoes_detalhe')
+    .select(`
+      vendedor, data_atividade, total_conversas_whatsapp, total_ligacoes, ligacoes_detalhe,
+      total_conversas_cliente, total_conversas_parceiro,
+      total_ligacoes_cliente, total_ligacoes_parceiro,
+      ligacoes_detalhe_cliente, ligacoes_detalhe_parceiro
+    `)
     .gte('data_atividade', since)
     .lte('data_atividade', until)
   if (error) throw error
   return data ?? []
 }
+
+export type AtividadeTipo = 'cliente' | 'parceiro'
 
 export interface AtividadeLogRow {
   vendedor: string
@@ -30,6 +46,7 @@ export interface AtividadeLogRow {
   resumo: string | null
   qtd_mensagens: number
   data_atividade: string
+  tipo: AtividadeTipo
 }
 
 export async function getAtividadeLog(
@@ -37,7 +54,7 @@ export async function getAtividadeLog(
 ): Promise<AtividadeLogRow[]> {
   const { data, error } = await supabase
     .from('[FH]atividade_vendedor_log')
-    .select('vendedor, contato_nome, contato_telefone, resumo, qtd_mensagens, data_atividade')
+    .select('vendedor, contato_nome, contato_telefone, resumo, qtd_mensagens, data_atividade, tipo')
     .gte('data_atividade', since)
     .lte('data_atividade', until)
     .order('data_atividade', { ascending: false })

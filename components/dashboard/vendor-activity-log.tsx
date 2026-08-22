@@ -40,14 +40,23 @@ export function VendorActivityLog({ rows }: { rows: AtividadeLogRow[] }) {
                 <span className="text-slate-400 text-xs mr-2">{isOpen ? '▼' : '▶'}</span>
                 {vendedor}
               </span>
-              <span className="text-xs text-slate-400">{entries.length} conversa{entries.length !== 1 ? 's' : ''}</span>
+              <span className="text-xs text-slate-400">
+                {entries.length} conversa{entries.length !== 1 ? 's' : ''}
+                {' · '}{entries.filter(e => e.tipo === 'cliente').length} cliente{entries.filter(e => e.tipo === 'cliente').length !== 1 ? 's' : ''}
+                {', '}{entries.filter(e => e.tipo === 'parceiro').length} parceiro{entries.filter(e => e.tipo === 'parceiro').length !== 1 ? 's' : ''}
+              </span>
             </button>
             {isOpen && (
               <div className="divide-y bg-slate-50">
                 {entries.map((e, i) => (
                   <div key={i} className="px-4 py-3">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium text-slate-700">{e.contato_nome ?? e.contato_telefone ?? '—'}</span>
+                      <span className="text-sm font-medium text-slate-700">
+                        {e.contato_nome ?? e.contato_telefone ?? '—'}
+                        <span className={`ml-2 text-[11px] px-1.5 py-0.5 rounded-full ${e.tipo === 'parceiro' ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {e.tipo === 'parceiro' ? 'Parceiro' : 'Cliente'}
+                        </span>
+                      </span>
                       <span className="text-xs text-slate-400 whitespace-nowrap">
                         {new Date(e.data_atividade).toLocaleDateString('pt-BR')} · {e.qtd_mensagens} msg{e.qtd_mensagens !== 1 ? 's' : ''}
                       </span>
