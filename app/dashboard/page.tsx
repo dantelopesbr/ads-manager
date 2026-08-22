@@ -30,7 +30,10 @@ function summarize(insights: DailySpend[], conversionsDaily: DailyLeads[], dealT
   const roasReal = calcROAS(dealTotals.won_deal_value > 0 ? dealTotals.won_deal_value : null, totalSpend)
   const roasProjected = calcROAS(dealTotals.total_deal_value > 0 ? dealTotals.total_deal_value : null, totalSpend)
   const conversionRate = totalLeads > 0 ? dealTotals.deal_count / totalLeads : null
-  return { totalSpend, totalLeads, cpl, roasReal, roasProjected, conversionRate }
+  // Custo por cliente fechado — distinct from CPL (cost per lead) and ROAS
+  // (revenue ratio): what a won sale actually cost in ad spend.
+  const cac = dealTotals.won_count > 0 ? totalSpend / dealTotals.won_count : null
+  return { totalSpend, totalLeads, cpl, roasReal, roasProjected, conversionRate, cac }
 }
 
 function calcDelta(curr: number | null, prev: number | null): number | null {
@@ -80,7 +83,7 @@ export default async function DashboardPage({
 
   const curr = summarize(current.insights, current.conversionsDaily, current.dealTotals)
   const prev = summarize(previous.insights, previous.conversionsDaily, previous.dealTotals)
-  const { totalSpend, totalLeads, cpl, roasReal, roasProjected, conversionRate } = curr
+  const { totalSpend, totalLeads, cpl, roasReal, roasProjected, conversionRate, cac } = curr
 
   const spendDelta = calcDelta(curr.totalSpend, prev.totalSpend)
   const leadsDelta = calcDelta(curr.totalLeads, prev.totalLeads)
@@ -88,6 +91,7 @@ export default async function DashboardPage({
   const roasRealDelta = calcDelta(curr.roasReal, prev.roasReal)
   const roasProjectedDelta = calcDelta(curr.roasProjected, prev.roasProjected)
   const conversionDelta = calcDelta(curr.conversionRate, prev.conversionRate)
+  const cacDelta = calcDelta(curr.cac, prev.cac)
 
   const byDate: Record<string, { spend: number; leads: number }> = {}
   for (const row of insights) {
@@ -141,6 +145,10 @@ export default async function DashboardPage({
             target={target.roas_target != null ? { label: formatROAS(target.roas_target), met: roasReal !== null && roasReal >= target.roas_target } : null}
           />
           <KpiCard title="ROAS Projetado" value={formatROAS(roasProjected)} subtitle="todos os deals" delta={roasProjectedDelta} />
+          <KpiCard
+            title="CAC" value={formatCurrency(cac)} subtitle={`${dealTotals.won_count} venda${dealTotals.won_count !== 1 ? 's' : ''} fechada${dealTotals.won_count !== 1 ? 's' : ''}`}
+            delta={cacDelta} positiveIsGood={false}
+          />
         </div>
         <p className="text-xs text-slate-400 -mt-6 mb-6">vs. período anterior ({prevSince} → {prevUntil})</p>
         <div className="bg-white rounded-xl border p-6 mb-8">
