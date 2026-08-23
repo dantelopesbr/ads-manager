@@ -3,14 +3,13 @@ import { Nav } from '@/components/nav'
 import { DateFilter } from '@/components/date-filter'
 import { formatCurrency, formatPercent } from '@/lib/metrics'
 import { format, subDays, parseISO } from 'date-fns'
-import { getPerformanceVendedorDiario, getMetaVendedorMensal, proportionalMeta } from '@/lib/performance-vendedor'
+import { getPerformanceVendedorDiario, getMetaVendedorMensal, proportionalMeta, getFunilVendedorAtual } from '@/lib/performance-vendedor'
 import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
 import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
 import { getOwnerBreakdown, getWhatsappMessages, getTeamPhones, getCalls } from '@/lib/queries'
 import { classifyMessage, buildTeamPhoneIndex, normalizePhoneSuffix, KNOWN_VENDORS, IA_VENDORS } from '@/lib/whatsapp-team'
 import { ActivityChart } from '@/components/vendedores/activity-chart'
-import { FUNNEL_STAGES, bucketDealStage, type FunnelBucket } from '@/lib/deal-stages'
 import { getPartnerCurrentStatus, PARCEIRO_ESTAGIOS, PARCEIRO_ESTAGIO_LABELS, type ParceiroEstagio } from '@/lib/atividade-comercial'
 import { fetchOwners } from '@/lib/hubspot/client'
 
@@ -33,7 +32,7 @@ export default async function VendedoresPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal] = await Promise.all([
+  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal, funilVendedor] = await Promise.all([
     getOwnerBreakdown(supabase, accountKeys, since, until),
     getWhatsappMessages(supabase, since, until),
     getTeamPhones(supabase),
@@ -42,6 +41,7 @@ export default async function VendedoresPage({
     fetchOwners(process.env.HUBSPOT_API_KEY!).catch(() => []),
     getPerformanceVendedorDiario(supabase, since, until),
     getMetaVendedorMensal(supabase, since, until),
+    getFunilVendedorAtual(supabase),
   ])
   const ownerNameById = Object.fromEntries(hubspotOwners.map(o => [o.id, o.name]))
 
@@ -123,18 +123,11 @@ export default async function VendedoresPage({
   const totalLeads = owners.reduce((s, o) => s + o.leads, 0)
   const periodLabel = `${since} → ${until}`
 
-  // Funil de vendas por vendedor — same buckets as the Dashboard's aggregate
-  // funnel, broken out per owner. Quantidade de orçamentos = "Orçamento" column.
-  const funnelByOwner: Record<string, Partial<Record<FunnelBucket, number>>> = {}
-  for (const r of rows) {
-    const owner = r.owner_name ?? SEM_VENDEDOR
-    if (!funnelByOwner[owner]) funnelByOwner[owner] = {}
-    const bucket = bucketDealStage(r.deal_stage)
-    funnelByOwner[owner][bucket] = (funnelByOwner[owner][bucket] ?? 0) + 1
-  }
-  const salesFunnelOwners = Object.keys(funnelByOwner).sort(
-    (a, b) => (byOwner[b]?.leads ?? 0) - (byOwner[a]?.leads ?? 0)
-  )
+  // Funil de vendas por vendedor — current count per stage, straight from
+  // HubSpot deals_raw via the BigQuery pipeline (see getFunilVendedorAtual).
+  const funilVendedorTotal = (r: (typeof funilVendedor)[number]) =>
+    r.lead + r.orcamento + r.venda_realizada + r.venda_perdida + r.inativo
+  const funilVendedorSorted = [...funilVendedor].sort((a, b) => funilVendedorTotal(b) - funilVendedorTotal(a))
 
   // Funil de parceiros por vendedor — current stage per partner, grouped by
   // owner (resolved via HubSpot owner_id -> name).
@@ -281,11 +274,10 @@ export default async function VendedoresPage({
           </div>
         </div>
 
-        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Vendas por Vendedor · {periodLabel}</h3>
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Vendas por Vendedor</h3>
         <p className="text-xs text-slate-400 mb-4">
-          Coluna &quot;Orçamento&quot; = quantidade de orçamentos em aberto por vendedor.
-          &quot;Venda Realizada&quot; vem de <code>performance_vendedor_diario</code> (HubSpot closedwon via pipeline BigQuery) —
-          o snapshot de deals no Supabase pode atrasar até 7 dias.
+          Estado atual (não filtrado por período) — quantos negócios estão em cada estágio hoje, contados
+          direto do HubSpot (via BigQuery), não do filtro de data acima.
         </p>
         <div className="bg-white rounded-xl border p-6">
           <div className="overflow-x-auto">
@@ -293,27 +285,27 @@ export default async function VendedoresPage({
               <thead>
                 <tr className="border-b text-slate-500 text-left">
                   <th className="pb-3 pr-4 font-medium">Vendedor</th>
-                  {FUNNEL_STAGES.map(s => (
-                    <th key={s.bucket} className="pb-3 pr-4 font-medium text-right">{s.bucket}</th>
-                  ))}
+                  <th className="pb-3 pr-4 font-medium text-right">Lead</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Inativo</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Orçamento</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Venda Realizada</th>
+                  <th className="pb-3 font-medium text-right">Venda Perdida</th>
                 </tr>
               </thead>
               <tbody>
-                {salesFunnelOwners.map(owner => (
-                  <tr key={owner} className="border-b last:border-0 hover:bg-slate-50">
-                    <td className={`py-2.5 pr-4 ${owner === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>{owner}</td>
-                    {FUNNEL_STAGES.map(s => (
-                      <td key={s.bucket} className={`py-2.5 pr-4 text-right ${s.bucket === 'Orçamento' ? 'font-semibold text-amber-700' : 'text-slate-600'}`}>
-                        {s.bucket === 'Venda Realizada'
-                          ? (financeByVendor[owner]?.ganhos ?? funnelByOwner[owner][s.bucket] ?? 0)
-                          : (funnelByOwner[owner][s.bucket] ?? 0)}
-                      </td>
-                    ))}
+                {funilVendedorSorted.map(f => (
+                  <tr key={f.vendedor} className="border-b last:border-0 hover:bg-slate-50">
+                    <td className="py-2.5 pr-4 font-medium">{f.vendedor}</td>
+                    <td className="py-2.5 pr-4 text-right text-slate-600">{f.lead}</td>
+                    <td className="py-2.5 pr-4 text-right text-slate-600">{f.inativo}</td>
+                    <td className="py-2.5 pr-4 text-right font-semibold text-amber-700">{f.orcamento}</td>
+                    <td className="py-2.5 pr-4 text-right font-medium text-emerald-700">{f.venda_realizada}</td>
+                    <td className="py-2.5 text-right text-slate-600">{f.venda_perdida}</td>
                   </tr>
                 ))}
-                {salesFunnelOwners.length === 0 && (
+                {funilVendedorSorted.length === 0 && (
                   <tr>
-                    <td colSpan={FUNNEL_STAGES.length + 1} className="py-6 text-center text-slate-400 text-sm">Nenhum lead no período</td>
+                    <td colSpan={6} className="py-6 text-center text-slate-400 text-sm">Sem dado de funil ainda</td>
                   </tr>
                 )}
               </tbody>
