@@ -88,14 +88,14 @@ function ActionButtons({
       <button
         title="Pausar campanha"
         onClick={() => onAction({ campaignId, campaignName, actionType: 'pause' })}
-        className="px-2 py-1 rounded-md text-xs bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
+        className="px-2 py-1 rounded-sm text-xs bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
       >
         ⏸
       </button>
       <button
         title="Alterar budget diário"
         onClick={() => onAction({ campaignId, campaignName, actionType: 'budget' })}
-        className="px-2 py-1 rounded-md text-xs bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
+        className="px-2 py-1 rounded-sm text-xs bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors"
       >
         💰
       </button>

@@ -14,7 +14,7 @@ export function FunnelChart({ counts, total }: Props) {
 
   return (
     <div>
-      <div className="flex w-full h-6 rounded-md overflow-hidden gap-0.5 bg-slate-100">
+      <div className="flex w-full h-6 rounded-sm overflow-hidden gap-0.5 bg-slate-100">
         {stages.map(s => {
           const pct = s.count / total
           if (pct === 0) return null

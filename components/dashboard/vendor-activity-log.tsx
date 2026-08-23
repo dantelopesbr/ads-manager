@@ -31,7 +31,7 @@ export function VendorActivityLog({ rows }: { rows: AtividadeLogRow[] }) {
         const isOpen = expanded.has(vendedor)
         const entries = byVendor[vendedor]
         return (
-          <div key={vendedor} className="border rounded-lg overflow-hidden">
+          <div key={vendedor} className="border rounded-sm overflow-hidden">
             <button
               onClick={() => toggle(vendedor)}
               className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-slate-50 transition-colors text-left"

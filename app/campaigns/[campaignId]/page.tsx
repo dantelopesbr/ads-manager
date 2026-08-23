@@ -99,7 +99,7 @@ export default async function CampaignDetailPage({ params }: Props) {
             Últimos 30 dias · {ads.length} anúncios · {totalLeads} leads
           </p>
         </div>
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-sm border p-6">
           <AdBreakdownTable ads={ads} avgCpl={avgCpl} />
         </div>
       </main>

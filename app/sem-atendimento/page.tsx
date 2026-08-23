@@ -146,12 +146,12 @@ export default async function SemAtendimentoPage() {
           <h2 className="text-2xl font-bold">Sem Atendimento</h2>
         </div>
         {selection === 'all' && (
-          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-sm px-3 py-2 mb-3">
             Modo “Todas as contas” só se aplica ao Dashboard — mostrando {ACCOUNTS[account].label} aqui.
           </p>
         )}
         {!whatsappAvailable && (
-          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-sm px-3 py-2 mb-3">
             {ACCOUNTS[account].label} não tem WhatsApp rastreado — coluna “IA respondeu” não disponível aqui.
           </p>
         )}
@@ -159,7 +159,7 @@ export default async function SemAtendimentoPage() {
           Leads entre 24h e 7 dias sem vendedor definido no HubSpot (atendidos pela IA mas não transferidos) · {unattended.length} de {leads.length}
         </p>
 
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-sm border p-6">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

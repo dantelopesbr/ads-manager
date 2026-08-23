@@ -80,8 +80,8 @@ export function Nav() {
   }
 
   return (
-    <nav className="w-56 min-h-screen bg-slate-900 text-white flex flex-col p-4 shrink-0">
-      <h1 className="text-lg font-bold mb-4">ADS Manager</h1>
+    <nav className="w-56 min-h-screen bg-brand-dark-gray text-white flex flex-col p-4 shrink-0">
+      <h1 className="font-display text-sm font-semibold uppercase tracking-[0.2em] mb-4">ADS Manager</h1>
       <AccountSwitcher current={account} />
       <LastSynced />
       <ul className="space-y-1 flex-1">
@@ -90,10 +90,10 @@ export function Nav() {
             <Link
               href={link.href}
               className={cn(
-                'block px-3 py-2 rounded-md text-sm transition-colors',
+                'block px-3 py-2 text-sm transition-colors',
                 pathname.startsWith(link.href)
-                  ? 'bg-slate-700 text-white'
-                  : 'text-slate-300 hover:bg-slate-800'
+                  ? 'bg-brand-dark-green text-white'
+                  : 'text-brand-light-green/80 hover:bg-white/10 hover:text-white'
               )}
             >
               {link.label}
@@ -103,7 +103,7 @@ export function Nav() {
       </ul>
       <button
         onClick={handleSignOut}
-        className="text-sm text-slate-400 hover:text-white px-3 py-2 text-left"
+        className="text-sm text-brand-light-green/70 hover:text-white px-3 py-2 text-left"
       >
         Sair
       </button>

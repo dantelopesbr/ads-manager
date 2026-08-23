@@ -151,11 +151,11 @@ export default async function DashboardPage({
           />
         </div>
         <p className="text-xs text-slate-400 -mt-6 mb-6">vs. período anterior ({prevSince} → {prevUntil})</p>
-        <div className="bg-white rounded-xl border p-6 mb-8">
+        <div className="bg-white rounded-sm border p-6 mb-8">
           <h3 className="text-sm font-semibold mb-4 text-slate-600">Leads + Spend · {periodLabel}</h3>
           <PerformanceChart data={chartData} />
         </div>
-        <div className="bg-white rounded-xl border p-6 mb-8">
+        <div className="bg-white rounded-sm border p-6 mb-8">
           <h3 className="text-sm font-semibold mb-4 text-slate-600">Funil de Vendas · {periodLabel}</h3>
           <FunnelChart counts={funnelCounts} total={leadStages.length} />
         </div>
@@ -172,12 +172,12 @@ export default async function DashboardPage({
           <VendorActivityLog rows={atividadeLog} />
         </div>
 
-        <div className="bg-white rounded-xl border p-6 mb-8">
+        <div className="bg-white rounded-sm border p-6 mb-8">
           <h4 className="text-sm font-semibold mb-4 text-slate-600">Estágio dos Parceiros · {periodLabel}</h4>
           <PartnerStageChart rows={parceiroStatusLog} />
         </div>
 
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-sm border p-6">
           <h4 className="text-sm font-semibold mb-1 text-slate-600">Funil de Parceiros</h4>
           <p className="text-xs text-slate-400 mb-4">Estado atual · {partnerCurrent.length} parceiros rastreados</p>
           <PartnerFunnel partners={partnerCurrent} ownerNameById={ownerNameById} />

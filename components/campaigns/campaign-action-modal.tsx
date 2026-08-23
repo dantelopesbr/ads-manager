@@ -81,7 +81,7 @@ export function CampaignActionModal({
 
         {/* Content */}
         {actionType === 'pause' && (
-          <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800 space-y-1">
+          <div className="rounded-sm bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800 space-y-1">
             <p className="font-medium">⚠️ Atenção</p>
             <p>A campanha será pausada imediatamente. Para reativar, use o Meta Ads Manager.</p>
           </div>
@@ -107,7 +107,7 @@ export function CampaignActionModal({
                   value={newBudget}
                   onChange={e => setNewBudget(e.target.value)}
                   placeholder="ex: 200.00"
-                  className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-sm text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <p className="text-xs text-slate-400 mt-1">Será convertido para centavos na API da Meta.</p>
@@ -117,14 +117,14 @@ export function CampaignActionModal({
 
         {/* Dry run result */}
         {dryRunResult && (
-          <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800">
+          <div className="rounded-sm bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800">
             <span className="font-mono">✓ {dryRunResult}</span>
           </div>
         )}
 
         {/* Error */}
         {error && (
-          <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+          <div className="rounded-sm bg-red-50 border border-red-200 p-3 text-sm text-red-700">
             {error}
           </div>
         )}
@@ -134,21 +134,21 @@ export function CampaignActionModal({
           <button
             onClick={onClose}
             disabled={loading}
-            className="flex-1 py-2 px-4 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
+            className="flex-1 py-2 px-4 rounded-sm border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
           >
             Cancelar
           </button>
           <button
             onClick={() => callAPI(true)}
             disabled={loading}
-            className="py-2 px-4 rounded-lg border border-blue-200 bg-blue-50 text-sm text-blue-700 hover:bg-blue-100 transition-colors"
+            className="py-2 px-4 rounded-sm border border-blue-200 bg-blue-50 text-sm text-blue-700 hover:bg-blue-100 transition-colors"
           >
             Simular (Dry Run)
           </button>
           <button
             onClick={() => callAPI(false)}
             disabled={loading}
-            className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium text-white transition-colors ${
+            className={`flex-1 py-2 px-4 rounded-sm text-sm font-medium text-white transition-colors ${
               loading
                 ? 'bg-slate-300 cursor-not-allowed'
                 : actionType === 'pause'

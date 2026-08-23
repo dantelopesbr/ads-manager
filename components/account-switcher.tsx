@@ -14,7 +14,7 @@ export function AccountSwitcher({ current }: { current: AccountSelection }) {
   }
 
   return (
-    <div className="flex rounded-md overflow-hidden border border-slate-700 mb-3 text-xs">
+    <div className="flex rounded-sm overflow-hidden border border-slate-700 mb-3 text-xs">
       {OPTIONS.map(({ key, label }) => (
         <button
           key={key}

@@ -13,7 +13,7 @@ function hubspotUrl(contactId: string) {
 function PartnerList({ partners, ownerNameById }: { partners: PartnerCurrent[]; ownerNameById: Record<string, string> }) {
   const sorted = [...partners].sort((a, b) => (b.dias_desde_contato ?? 0) - (a.dias_desde_contato ?? 0))
   return (
-    <div className="border rounded-lg divide-y bg-slate-50 mt-2">
+    <div className="border rounded-sm divide-y bg-slate-50 mt-2">
       {sorted.map(p => (
         <div key={p.contact_id} className="flex items-center justify-between px-4 py-2.5 text-sm">
           <div>
@@ -80,9 +80,9 @@ export function PartnerFunnel({ partners, ownerNameById }: { partners: PartnerCu
                     </span>
                     <span className="text-sm font-bold text-slate-700">{count}</span>
                   </div>
-                  <div className="h-6 bg-slate-100 rounded-md overflow-hidden">
+                  <div className="h-6 bg-slate-100 rounded-sm overflow-hidden">
                     <div
-                      className="h-full rounded-md transition-all"
+                      className="h-full rounded-sm transition-all"
                       style={{ width: `${widthPct}%`, backgroundColor: PARCEIRO_ESTAGIO_COLORS[estagio] }}
                     />
                   </div>
@@ -102,7 +102,7 @@ export function PartnerFunnel({ partners, ownerNameById }: { partners: PartnerCu
                 <button
                   key={estagio}
                   onClick={() => toggle(estagio)}
-                  className={`rounded-lg border p-3 text-left transition-colors ${isSelected ? 'ring-2 ring-offset-1' : 'hover:bg-slate-50'}`}
+                  className={`rounded-sm border p-3 text-left transition-colors ${isSelected ? 'ring-2 ring-offset-1' : 'hover:bg-slate-50'}`}
                   style={isSelected ? { borderColor: PARCEIRO_ESTAGIO_COLORS[estagio] } : undefined}
                 >
                   <p className="text-2xl font-bold" style={{ color: PARCEIRO_ESTAGIO_COLORS[estagio] }}>{count}</p>

@@ -45,7 +45,7 @@ export function DateFilter({ from, to }: Props) {
           <button
             key={s.label}
             onClick={() => setRange(s.from, s.to)}
-            className="px-2.5 py-1.5 rounded-md text-xs text-slate-500 border hover:bg-slate-50 transition-colors"
+            className="px-2.5 py-1.5 rounded-sm text-xs text-slate-500 border hover:bg-slate-50 transition-colors"
           >
             {s.label}
           </button>
@@ -56,14 +56,14 @@ export function DateFilter({ from, to }: Props) {
         type="date"
         value={from}
         onChange={e => update('from', e.target.value)}
-        className="border rounded-md px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
+        className="border rounded-sm px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
       />
       <span className="text-slate-500">até</span>
       <input
         type="date"
         value={to}
         onChange={e => update('to', e.target.value)}
-        className="border rounded-md px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
+        className="border rounded-sm px-2 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
       />
       <button
         onClick={() => {
@@ -72,7 +72,7 @@ export function DateFilter({ from, to }: Props) {
           params.delete('to')
           router.push(`${pathname}?${params.toString()}`)
         }}
-        className="px-3 py-1.5 rounded-md text-xs text-slate-500 border hover:bg-slate-50 transition-colors"
+        className="px-3 py-1.5 rounded-sm text-xs text-slate-500 border hover:bg-slate-50 transition-colors"
       >
         Limpar
       </button>

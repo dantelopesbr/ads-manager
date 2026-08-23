@@ -31,10 +31,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <Card className="w-full max-w-sm">
+    <div className="min-h-screen flex items-center justify-center bg-brand-nude">
+      <Card className="w-full max-w-sm border-brand-dark-gray/10">
         <CardHeader>
-          <CardTitle>ADS Manager</CardTitle>
+          <CardTitle className="font-display uppercase tracking-[0.15em] text-brand-dark-gray">ADS Manager</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

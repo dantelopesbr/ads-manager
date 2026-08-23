@@ -72,7 +72,7 @@ export function VendorActivityCards({ rows }: { rows: ResumoDiarioRow[] }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {vendors.map(v => (
-        <div key={v.vendedor} className="bg-white rounded-xl border p-5">
+        <div key={v.vendedor} className="bg-white rounded-sm border p-5">
           <p className="text-sm font-semibold text-slate-700 mb-3">{v.vendedor}</p>
           <div className="grid grid-cols-2 gap-4">
             <GroupStat label="Clientes" group={v.cliente} />

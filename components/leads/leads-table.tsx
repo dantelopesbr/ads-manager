@@ -75,12 +75,12 @@ export function LeadsTable({ leads }: { leads: LeadRow[] }) {
           placeholder="Buscar telefone..."
           value={phone}
           onChange={e => setPhone(e.target.value)}
-          className="border rounded-md px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300 w-44"
+          className="border rounded-sm px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300 w-44"
         />
         <select
           value={campaign}
           onChange={e => setCampaign(e.target.value)}
-          className="border rounded-md px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300 max-w-xs"
+          className="border rounded-sm px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300 max-w-xs"
         >
           <option value="">Todas as campanhas</option>
           {campaigns.map(c => <option key={c} value={c}>{c}</option>)}
@@ -88,7 +88,7 @@ export function LeadsTable({ leads }: { leads: LeadRow[] }) {
         <select
           value={status}
           onChange={e => setStatus(e.target.value)}
-          className="border rounded-md px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          className="border rounded-sm px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
         >
           <option value="">Todos os status</option>
           {Object.keys(STATUS_GROUPS).map(s => <option key={s} value={s}>{s}</option>)}
@@ -96,7 +96,7 @@ export function LeadsTable({ leads }: { leads: LeadRow[] }) {
         <select
           value={vendor}
           onChange={e => setVendor(e.target.value)}
-          className="border rounded-md px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          className="border rounded-sm px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300"
         >
           <option value="">Todos os vendedores</option>
           {vendors.map(v => <option key={v} value={v}>{v}</option>)}
@@ -104,7 +104,7 @@ export function LeadsTable({ leads }: { leads: LeadRow[] }) {
         {hasFilter && (
           <button
             onClick={() => { setPhone(''); setCampaign(''); setStatus(''); setVendor('') }}
-            className="px-3 py-1.5 rounded-md text-xs text-slate-500 border hover:bg-slate-50 transition-colors"
+            className="px-3 py-1.5 rounded-sm text-xs text-slate-500 border hover:bg-slate-50 transition-colors"
           >
             Limpar
           </button>

@@ -191,11 +191,11 @@ export default async function CampaignsPage({
           <Suspense fallback={null}><DateFilter from={since ?? ''} to={until} /></Suspense>
         </div>
         {selection === 'all' && (
-          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-4">
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-sm px-3 py-2 mb-4">
             Modo “Todas as contas” só se aplica ao Dashboard — mostrando {ACCOUNTS[account].label} aqui.
           </p>
         )}
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-sm border p-6">
           <CampaignsTable campaigns={campaigns} avgCpl={avgCpl} />
         </div>
       </main>

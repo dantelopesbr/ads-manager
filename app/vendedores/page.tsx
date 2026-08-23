@@ -230,7 +230,7 @@ export default async function VendedoresPage({
         </div>
         <p className="text-sm text-slate-500 mb-6">{periodLabel} · {totalLeads} leads · {owners.length} vendedor{owners.length !== 1 ? 'es' : ''}</p>
 
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-sm border p-6">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -273,7 +273,7 @@ export default async function VendedoresPage({
           Atividade (peso 20, ranking de conversas+ligações dentro do time) — peso redistribuído quando um
           componente fica de fora.
         </p>
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-sm border p-6">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -326,7 +326,7 @@ export default async function VendedoresPage({
           Estado atual (não filtrado por período) — quantos negócios estão em cada estágio hoje, contados
           direto do HubSpot (via BigQuery), não do filtro de data acima.
         </p>
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-sm border p-6">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -362,7 +362,7 @@ export default async function VendedoresPage({
 
         <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Parceiros por Vendedor</h3>
         <p className="text-xs text-slate-400 mb-4">Estado atual dos parceiros (últimos 35 dias), agrupado pelo dono no HubSpot.</p>
-        <div className="bg-white rounded-xl border p-6">
+        <div className="bg-white rounded-sm border p-6">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -398,7 +398,7 @@ export default async function VendedoresPage({
 
         <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">WhatsApp · {periodLabel}</h3>
         <p className="text-xs text-slate-400 mb-4">Disponível apenas para Fratelli House — FratelliRev ainda não tem esse dado. Vendedor identificado pelo número que atendeu a conversa (não pelo texto da mensagem).</p>
-        <div className="bg-white rounded-xl border p-6 max-w-md">
+        <div className="bg-white rounded-sm border p-6 max-w-md">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-slate-500 text-left">
@@ -420,14 +420,14 @@ export default async function VendedoresPage({
         </div>
 
         {messagesChartData.length > 0 && (
-          <div className="bg-white rounded-xl border p-6 mt-6">
+          <div className="bg-white rounded-sm border p-6 mt-6">
             <h4 className="text-sm font-semibold mb-4 text-slate-600">Conversas iniciadas por dia (contatos distintos)</h4>
             <ActivityChart data={messagesChartData} vendors={messagesChartVendors} target={35} />
           </div>
         )}
 
         <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Ligações · {periodLabel}</h3>
-        <div className="bg-white rounded-xl border p-6 max-w-md">
+        <div className="bg-white rounded-sm border p-6 max-w-md">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-slate-500 text-left">
@@ -454,7 +454,7 @@ export default async function VendedoresPage({
         </div>
 
         {callsChartData.length > 0 && (
-          <div className="bg-white rounded-xl border p-6 mt-6">
+          <div className="bg-white rounded-sm border p-6 mt-6">
             <h4 className="text-sm font-semibold mb-4 text-slate-600">Ligações por dia</h4>
             <ActivityChart data={callsChartData} vendors={callsChartVendors} target={20} />
           </div>
