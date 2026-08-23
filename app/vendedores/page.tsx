@@ -282,7 +282,11 @@ export default async function VendedoresPage({
         </div>
 
         <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Vendas por Vendedor · {periodLabel}</h3>
-        <p className="text-xs text-slate-400 mb-4">Coluna &quot;Orçamento&quot; = quantidade de orçamentos em aberto por vendedor.</p>
+        <p className="text-xs text-slate-400 mb-4">
+          Coluna &quot;Orçamento&quot; = quantidade de orçamentos em aberto por vendedor.
+          &quot;Venda Realizada&quot; vem de <code>performance_vendedor_diario</code> (HubSpot closedwon via pipeline BigQuery) —
+          o snapshot de deals no Supabase pode atrasar até 7 dias.
+        </p>
         <div className="bg-white rounded-xl border p-6">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -300,7 +304,9 @@ export default async function VendedoresPage({
                     <td className={`py-2.5 pr-4 ${owner === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>{owner}</td>
                     {FUNNEL_STAGES.map(s => (
                       <td key={s.bucket} className={`py-2.5 pr-4 text-right ${s.bucket === 'Orçamento' ? 'font-semibold text-amber-700' : 'text-slate-600'}`}>
-                        {funnelByOwner[owner][s.bucket] ?? 0}
+                        {s.bucket === 'Venda Realizada'
+                          ? (financeByVendor[owner]?.ganhos ?? funnelByOwner[owner][s.bucket] ?? 0)
+                          : (funnelByOwner[owner][s.bucket] ?? 0)}
                       </td>
                     ))}
                   </tr>
