@@ -10,7 +10,7 @@ import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
 import { getOwnerBreakdown, getWhatsappMessages, getTeamPhones, getCalls } from '@/lib/queries'
 import { classifyMessage, buildTeamPhoneIndex, normalizePhoneSuffix, KNOWN_VENDORS, IA_VENDORS } from '@/lib/whatsapp-team'
 import { ActivityChart } from '@/components/vendedores/activity-chart'
-import { getPartnerCurrentStatus, PARCEIRO_ESTAGIOS, PARCEIRO_ESTAGIO_LABELS, type ParceiroEstagio } from '@/lib/atividade-comercial'
+import { getPartnerCurrentStatus, getResumoDiario, PARCEIRO_ESTAGIOS, PARCEIRO_ESTAGIO_LABELS, type ParceiroEstagio } from '@/lib/atividade-comercial'
 import { fetchOwners } from '@/lib/hubspot/client'
 
 export const dynamic = 'force-dynamic'
@@ -32,7 +32,7 @@ export default async function VendedoresPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal, funilVendedor] = await Promise.all([
+  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal, funilVendedor, resumoDiario] = await Promise.all([
     getOwnerBreakdown(supabase, accountKeys, since, until),
     getWhatsappMessages(supabase, since, until),
     getTeamPhones(supabase),
@@ -42,6 +42,7 @@ export default async function VendedoresPage({
     getPerformanceVendedorDiario(supabase, since, until),
     getMetaVendedorMensal(supabase, since, until),
     getFunilVendedorAtual(supabase),
+    getResumoDiario(supabase, since, until),
   ])
   const ownerNameById = Object.fromEntries(hubspotOwners.map(o => [o.id, o.name]))
 
@@ -159,18 +160,53 @@ export default async function VendedoresPage({
     if (!metaByVendor[m.vendedor]) metaByVendor[m.vendedor] = {}
     metaByVendor[m.vendedor][m.mes] = m.meta_valor
   }
+
+  // Score do vendedor: Meta (peso 50, capado em 100) + Conversão (peso 30, só
+  // com >=5 deals criados no período) + Atividade (peso 20, ranking relativo
+  // de conversas+ligações dentro do time, mesmo período). Componente
+  // indisponível sai da conta e os pesos restantes são renormalizados —
+  // weightedScore faz isso automaticamente dividindo pela soma dos pesos
+  // presentes, em vez de fixar percentuais por caso.
+  const activityByVendor: Record<string, number> = {}
+  for (const r of resumoDiario) {
+    activityByVendor[r.vendedor] = (activityByVendor[r.vendedor] ?? 0) + r.total_conversas_whatsapp + r.total_ligacoes
+  }
+  const maxActivity = Math.max(0, ...Object.values(activityByVendor))
+
+  function weightedScore(components: { score: number | null; weight: number }[]): number | null {
+    const available = components.filter((c): c is { score: number; weight: number } => c.score !== null)
+    if (available.length === 0) return null
+    const totalWeight = available.reduce((s, c) => s + c.weight, 0)
+    return available.reduce((s, c) => s + c.score * c.weight, 0) / totalWeight
+  }
+
   const sinceDate = parseISO(since)
   const untilDate = parseISO(until)
-  const financeRows = Object.entries(financeByVendor)
-    .map(([vendedor, f]) => {
+  const allVendorNames = new Set([...Object.keys(financeByVendor), ...Object.keys(activityByVendor)])
+  const financeRows = [...allVendorNames]
+    .map(vendedor => {
+      const f = financeByVendor[vendedor] ?? { receita: 0, criados: 0, ganhos: 0 }
       const metaProporcional = proportionalMeta(sinceDate, untilDate, metaByVendor[vendedor] ?? {})
+      const atingimento = metaProporcional !== null && metaProporcional > 0 ? f.receita / metaProporcional : null
+      const activity = activityByVendor[vendedor] ?? 0
+      const metaScore = atingimento !== null ? Math.min(100, atingimento * 100) : null
+      const hasConversaoScore = f.criados >= 5
+      const conversaoScore = hasConversaoScore ? (f.ganhos / f.criados) * 100 : null
+      const activityScore = maxActivity > 0 ? (activity / maxActivity) * 100 : 0
+      const score = weightedScore([
+        { score: metaScore, weight: 50 },
+        { score: conversaoScore, weight: 30 },
+        { score: activityScore, weight: 20 },
+      ])
       return {
         vendedor,
         ...f,
         ticketMedio: f.ganhos > 0 ? f.receita / f.ganhos : null,
         conversao: f.criados > 0 ? f.ganhos / f.criados : null,
         metaProporcional,
-        atingimento: metaProporcional !== null && metaProporcional > 0 ? f.receita / metaProporcional : null,
+        atingimento,
+        hasConversaoScore,
+        score,
       }
     })
     .sort((a, b) => b.receita - a.receita)
@@ -231,7 +267,12 @@ export default async function VendedoresPage({
         </div>
 
         <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Financeiro por Vendedor · {periodLabel}</h3>
-        <p className="text-xs text-slate-400 mb-4">Receita fechada via HubSpot (closedwon) · meta proporcional aos dias do período dentro de cada mês.</p>
+        <p className="text-xs text-slate-400 mb-4">
+          Receita fechada via HubSpot (closedwon) · meta proporcional aos dias do período dentro de cada mês.
+          Score = Meta (peso 50, capado em 100) + Conversão (peso 30, só com 5+ deals criados no período) +
+          Atividade (peso 20, ranking de conversas+ligações dentro do time) — peso redistribuído quando um
+          componente fica de fora.
+        </p>
         <div className="bg-white rounded-xl border p-6">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -244,7 +285,8 @@ export default async function VendedoresPage({
                   <th className="pb-3 pr-4 font-medium text-right">Ticket Médio</th>
                   <th className="pb-3 pr-4 font-medium text-right">Receita Fechada</th>
                   <th className="pb-3 pr-4 font-medium text-right">Meta (proporcional)</th>
-                  <th className="pb-3 font-medium text-right">Atingimento</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Atingimento</th>
+                  <th className="pb-3 font-medium text-right">Score</th>
                 </tr>
               </thead>
               <tbody>
@@ -259,19 +301,24 @@ export default async function VendedoresPage({
                     <td className="py-2.5 pr-4 text-right text-slate-500">
                       {f.metaProporcional !== null ? formatCurrency(f.metaProporcional) : 'meta não definida'}
                     </td>
-                    <td className="py-2.5 text-right font-medium">
+                    <td className="py-2.5 pr-4 text-right font-medium">
                       {f.atingimento !== null ? formatPercent(f.atingimento) : '—'}
+                    </td>
+                    <td className="py-2.5 text-right font-semibold">
+                      {f.score !== null ? f.score.toFixed(0) : '—'}
+                      {!f.hasConversaoScore && f.score !== null && <span className="text-slate-400 font-normal">*</span>}
                     </td>
                   </tr>
                 ))}
                 {financeRows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="py-6 text-center text-slate-400 text-sm">Sem dado financeiro no período</td>
+                    <td colSpan={9} className="py-6 text-center text-slate-400 text-sm">Sem dado financeiro no período</td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+          <p className="text-[11px] text-slate-400 mt-3">* menos de 5 deals criados no período — conversão fora do score, peso redistribuído entre Meta e Atividade.</p>
         </div>
 
         <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Vendas por Vendedor</h3>
