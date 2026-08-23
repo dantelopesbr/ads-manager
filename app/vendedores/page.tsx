@@ -2,7 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { Nav } from '@/components/nav'
 import { DateFilter } from '@/components/date-filter'
 import { formatCurrency, formatPercent } from '@/lib/metrics'
-import { format, subDays } from 'date-fns'
+import { format, subDays, parseISO } from 'date-fns'
+import { getPerformanceVendedorDiario, getMetaVendedorMensal, proportionalMeta } from '@/lib/performance-vendedor'
 import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
 import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
@@ -32,13 +33,15 @@ export default async function VendedoresPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners] = await Promise.all([
+  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal] = await Promise.all([
     getOwnerBreakdown(supabase, accountKeys, since, until),
     getWhatsappMessages(supabase, since, until),
     getTeamPhones(supabase),
     getCalls(supabase, since, until),
     getPartnerCurrentStatus(supabase),
     fetchOwners(process.env.HUBSPOT_API_KEY!).catch(() => []),
+    getPerformanceVendedorDiario(supabase, since, until),
+    getMetaVendedorMensal(supabase, since, until),
   ])
   const ownerNameById = Object.fromEntries(hubspotOwners.map(o => [o.id, o.name]))
 
@@ -147,6 +150,38 @@ export default async function VendedoresPage({
     (a, b) => partnerOwnerTotal(b) - partnerOwnerTotal(a)
   )
 
+  // Financeiro + meta por vendedor — performance_vendedor_diario (HubSpot
+  // closedwon, já confirmado que reflete o Bling) somado no período, cruzado
+  // com meta_vendedor_mensal proporcional aos dias do range em cada mês.
+  type FinanceAgg = { receita: number; criados: number; ganhos: number }
+  const financeByVendor: Record<string, FinanceAgg> = {}
+  for (const r of performanceDiario) {
+    if (!financeByVendor[r.vendedor]) financeByVendor[r.vendedor] = { receita: 0, criados: 0, ganhos: 0 }
+    financeByVendor[r.vendedor].receita += r.receita_fechada
+    financeByVendor[r.vendedor].criados += r.deals_criados
+    financeByVendor[r.vendedor].ganhos += r.deals_ganhos
+  }
+  const metaByVendor: Record<string, Record<string, number>> = {}
+  for (const m of metaMensal) {
+    if (!metaByVendor[m.vendedor]) metaByVendor[m.vendedor] = {}
+    metaByVendor[m.vendedor][m.mes] = m.meta_valor
+  }
+  const sinceDate = parseISO(since)
+  const untilDate = parseISO(until)
+  const financeRows = Object.entries(financeByVendor)
+    .map(([vendedor, f]) => {
+      const metaProporcional = proportionalMeta(sinceDate, untilDate, metaByVendor[vendedor] ?? {})
+      return {
+        vendedor,
+        ...f,
+        ticketMedio: f.ganhos > 0 ? f.receita / f.ganhos : null,
+        conversao: f.criados > 0 ? f.ganhos / f.criados : null,
+        metaProporcional,
+        atingimento: metaProporcional !== null && metaProporcional > 0 ? f.receita / metaProporcional : null,
+      }
+    })
+    .sort((a, b) => b.receita - a.receita)
+
   return (
     <div className="flex">
       <Nav />
@@ -195,6 +230,50 @@ export default async function VendedoresPage({
                 {owners.length === 0 && (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-slate-400 text-sm">Nenhum lead no período</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Financeiro por Vendedor · {periodLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">Receita fechada via HubSpot (closedwon) · meta proporcional aos dias do período dentro de cada mês.</p>
+        <div className="bg-white rounded-xl border p-6">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-slate-500 text-left">
+                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Deals Criados</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Deals Ganhos</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Conversão</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Ticket Médio</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Receita Fechada</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Meta (proporcional)</th>
+                  <th className="pb-3 font-medium text-right">Atingimento</th>
+                </tr>
+              </thead>
+              <tbody>
+                {financeRows.map(f => (
+                  <tr key={f.vendedor} className="border-b last:border-0 hover:bg-slate-50">
+                    <td className="py-2.5 pr-4 font-medium">{f.vendedor}</td>
+                    <td className="py-2.5 pr-4 text-right">{f.criados}</td>
+                    <td className="py-2.5 pr-4 text-right">{f.ganhos}</td>
+                    <td className="py-2.5 pr-4 text-right">{formatPercent(f.conversao)}</td>
+                    <td className="py-2.5 pr-4 text-right">{f.ticketMedio !== null ? formatCurrency(f.ticketMedio) : '—'}</td>
+                    <td className="py-2.5 pr-4 text-right font-medium text-emerald-700">{formatCurrency(f.receita || null)}</td>
+                    <td className="py-2.5 pr-4 text-right text-slate-500">
+                      {f.metaProporcional !== null ? formatCurrency(f.metaProporcional) : 'meta não definida'}
+                    </td>
+                    <td className="py-2.5 text-right font-medium">
+                      {f.atingimento !== null ? formatPercent(f.atingimento) : '—'}
+                    </td>
+                  </tr>
+                ))}
+                {financeRows.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="py-6 text-center text-slate-400 text-sm">Sem dado financeiro no período</td>
                   </tr>
                 )}
               </tbody>
