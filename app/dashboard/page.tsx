@@ -4,7 +4,7 @@ import { KpiCard } from '@/components/dashboard/kpi-card'
 import { PerformanceChart } from '@/components/dashboard/performance-chart'
 import { FunnelChart } from '@/components/dashboard/funnel-chart'
 import { DateFilter } from '@/components/date-filter'
-import { calcCPL, calcROAS, formatCurrency, formatROAS, formatPercent } from '@/lib/metrics'
+import { calcCPL, calcROAS, formatCurrency, formatROAS, formatPercent, calcDelta } from '@/lib/metrics'
 import { bucketDealStage, type FunnelBucket } from '@/lib/deal-stages'
 import { format, subDays, differenceInCalendarDays, parseISO } from 'date-fns'
 import { Suspense } from 'react'
@@ -34,11 +34,6 @@ function summarize(insights: DailySpend[], conversionsDaily: DailyLeads[], dealT
   // (revenue ratio): what a won sale actually cost in ad spend.
   const cac = dealTotals.won_count > 0 ? totalSpend / dealTotals.won_count : null
   return { totalSpend, totalLeads, cpl, roasReal, roasProjected, conversionRate, cac }
-}
-
-function calcDelta(curr: number | null, prev: number | null): number | null {
-  if (curr === null || prev === null || prev === 0) return null
-  return ((curr - prev) / prev) * 100
 }
 
 export default async function DashboardPage({

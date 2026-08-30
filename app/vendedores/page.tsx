@@ -4,6 +4,8 @@ import { DateFilter } from '@/components/date-filter'
 import { formatCurrency, formatPercent } from '@/lib/metrics'
 import { format, subDays, parseISO } from 'date-fns'
 import { getPerformanceVendedorDiario, getMetaVendedorMensal, proportionalMeta, getFunilVendedorAtual } from '@/lib/performance-vendedor'
+import { computeVendorScore } from '@/lib/vendor-score'
+import Link from 'next/link'
 import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
 import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
@@ -163,22 +165,12 @@ export default async function VendedoresPage({
 
   // Score do vendedor: Meta (peso 50, capado em 100) + Conversão (peso 30, só
   // com >=5 deals criados no período) + Atividade (peso 20, ranking relativo
-  // de conversas+ligações dentro do time, mesmo período). Componente
-  // indisponível sai da conta e os pesos restantes são renormalizados —
-  // weightedScore faz isso automaticamente dividindo pela soma dos pesos
-  // presentes, em vez de fixar percentuais por caso.
+  // de conversas+ligações dentro do time, mesmo período) — ver lib/vendor-score.
   const activityByVendor: Record<string, number> = {}
   for (const r of resumoDiario) {
     activityByVendor[r.vendedor] = (activityByVendor[r.vendedor] ?? 0) + r.total_conversas_whatsapp + r.total_ligacoes
   }
   const maxActivity = Math.max(0, ...Object.values(activityByVendor))
-
-  function weightedScore(components: { score: number | null; weight: number }[]): number | null {
-    const available = components.filter((c): c is { score: number; weight: number } => c.score !== null)
-    if (available.length === 0) return null
-    const totalWeight = available.reduce((s, c) => s + c.weight, 0)
-    return available.reduce((s, c) => s + c.score * c.weight, 0) / totalWeight
-  }
 
   const sinceDate = parseISO(since)
   const untilDate = parseISO(until)
@@ -187,17 +179,10 @@ export default async function VendedoresPage({
     .map(vendedor => {
       const f = financeByVendor[vendedor] ?? { receita: 0, criados: 0, ganhos: 0 }
       const metaProporcional = proportionalMeta(sinceDate, untilDate, metaByVendor[vendedor] ?? {})
-      const atingimento = metaProporcional !== null && metaProporcional > 0 ? f.receita / metaProporcional : null
       const activity = activityByVendor[vendedor] ?? 0
-      const metaScore = atingimento !== null ? Math.min(100, atingimento * 100) : null
-      const hasConversaoScore = f.criados >= 5
-      const conversaoScore = hasConversaoScore ? (f.ganhos / f.criados) * 100 : null
-      const activityScore = maxActivity > 0 ? (activity / maxActivity) * 100 : 0
-      const score = weightedScore([
-        { score: metaScore, weight: 50 },
-        { score: conversaoScore, weight: 30 },
-        { score: activityScore, weight: 20 },
-      ])
+      const { score, hasConversaoScore, atingimento } = computeVendorScore({
+        receita: f.receita, metaValor: metaProporcional, criados: f.criados, ganhos: f.ganhos, activity, maxActivity,
+      })
       return {
         vendedor,
         ...f,
@@ -286,7 +271,8 @@ export default async function VendedoresPage({
                   <th className="pb-3 pr-4 font-medium text-right">Receita Fechada</th>
                   <th className="pb-3 pr-4 font-medium text-right">Meta (proporcional)</th>
                   <th className="pb-3 pr-4 font-medium text-right">Atingimento</th>
-                  <th className="pb-3 font-medium text-right">Score</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Score</th>
+                  <th className="pb-3 font-medium text-right">Relatório</th>
                 </tr>
               </thead>
               <tbody>
@@ -304,15 +290,20 @@ export default async function VendedoresPage({
                     <td className="py-2.5 pr-4 text-right font-medium">
                       {f.atingimento !== null ? formatPercent(f.atingimento) : '—'}
                     </td>
-                    <td className="py-2.5 text-right font-semibold">
+                    <td className="py-2.5 pr-4 text-right font-semibold">
                       {f.score !== null ? f.score.toFixed(0) : '—'}
                       {!f.hasConversaoScore && f.score !== null && <span className="text-slate-400 font-normal">*</span>}
+                    </td>
+                    <td className="py-2.5 text-right">
+                      <Link href={`/vendedores/${encodeURIComponent(f.vendedor)}`} className="text-brand-dark-green hover:underline text-xs font-medium">
+                        Ver relatório
+                      </Link>
                     </td>
                   </tr>
                 ))}
                 {financeRows.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="py-6 text-center text-slate-400 text-sm">Sem dado financeiro no período</td>
+                    <td colSpan={10} className="py-6 text-center text-slate-400 text-sm">Sem dado financeiro no período</td>
                   </tr>
                 )}
               </tbody>
