@@ -19,7 +19,8 @@ vi.mock('../meta/client', () => ({
 }))
 
 const mockUpsert = vi.fn().mockResolvedValue({ error: null })
-const mockSelect = vi.fn().mockResolvedValue({ count: 5, error: null })
+const mockEq = vi.fn().mockResolvedValue({ count: 5, error: null })
+const mockSelect = vi.fn().mockReturnValue({ eq: mockEq })
 const mockFrom = vi.fn().mockReturnValue({
   select: mockSelect,
   upsert: mockUpsert,
@@ -31,19 +32,20 @@ describe('syncMetaInsights', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockFrom.mockReturnValue({ select: mockSelect, upsert: mockUpsert })
-    mockSelect.mockResolvedValue({ count: 5, error: null })
+    mockSelect.mockReturnValue({ eq: mockEq })
+    mockEq.mockResolvedValue({ count: 5, error: null })
     mockUpsert.mockResolvedValue({ error: null })
   })
 
   it('returns count of synced records', async () => {
     const { syncMetaInsights } = await import('../meta/sync')
-    const count = await syncMetaInsights(mockSupabase as any)
+    const count = await syncMetaInsights(mockSupabase as any, 'fratellihouse', 'tok', 'act_123')
     expect(count).toBe(1)
   })
 
   it('calls upsert with correct shape', async () => {
     const { syncMetaInsights } = await import('../meta/sync')
-    await syncMetaInsights(mockSupabase as any)
+    await syncMetaInsights(mockSupabase as any, 'fratellihouse', 'tok', 'act_123')
     expect(mockUpsert).toHaveBeenCalled()
     const rows = mockUpsert.mock.calls[0][0]
     expect(rows[0]).toMatchObject({

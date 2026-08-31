@@ -27,3 +27,9 @@ export function formatPercent(value: number | null): string {
   if (value === null) return '—'
   return `${(value * 100).toFixed(2)}%`
 }
+
+/** Percent change vs. a prior-period baseline (e.g. 12.5 = +12.5%). */
+export function calcDelta(curr: number | null, prev: number | null): number | null {
+  if (curr === null || prev === null || prev === 0) return null
+  return ((curr - prev) / prev) * 100
+}

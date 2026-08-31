@@ -3,6 +3,9 @@ import { Nav } from '@/components/nav'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SyncButton } from './sync-button'
+import { TargetsForm } from '@/components/settings/targets-form'
+import { ACCOUNTS, ACCOUNT_KEYS } from '@/lib/account'
+import { DEFAULT_CPL_ALERT_MULTIPLIER, DEFAULT_CTR_ALERT_MIN } from '@/lib/queries'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,10 +16,16 @@ export default async function SettingsPage() {
     .from('sync_logs')
     .select('type, status, records_synced, message, created_at')
     .order('created_at', { ascending: false })
-    .limit(10)
+    .limit(20)
+
+  const { data: targets } = await supabase
+    .from('account_targets')
+    .select('account, cpl_target, roas_target, cpl_alert_multiplier, ctr_alert_min')
+  const targetByAccount = Object.fromEntries((targets ?? []).map(t => [t.account, t]))
 
   const lastMeta = logs?.find(l => l.type === 'meta')
   const lastHubspot = logs?.find(l => l.type === 'hubspot')
+  const lastAlerts = logs?.find(l => l.type === 'alerts')
 
   const metaTokenSet = !!process.env.META_ACCESS_TOKEN
   const hubspotKeySet = !!process.env.HUBSPOT_API_KEY
@@ -52,6 +61,23 @@ export default async function SettingsPage() {
         </Card>
 
         <Card className="mb-6">
+          <CardHeader><CardTitle className="text-base">Metas por Conta</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            {ACCOUNT_KEYS.map(key => (
+              <TargetsForm
+                key={key}
+                account={key}
+                label={ACCOUNTS[key].label}
+                initialCplTarget={targetByAccount[key]?.cpl_target ?? null}
+                initialRoasTarget={targetByAccount[key]?.roas_target ?? null}
+                initialCplAlertMultiplier={targetByAccount[key]?.cpl_alert_multiplier ?? DEFAULT_CPL_ALERT_MULTIPLIER}
+                initialCtrAlertMin={targetByAccount[key]?.ctr_alert_min ?? DEFAULT_CTR_ALERT_MIN}
+              />
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card className="mb-6">
           <CardHeader><CardTitle className="text-base">Sincronização Manual</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between">
@@ -81,6 +107,20 @@ export default async function SettingsPage() {
                 )}
               </div>
               <SyncButton endpoint="/api/hubspot/enrich" label="Sync HubSpot" />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Alertas</p>
+                {lastAlerts && (
+                  <p className="text-xs text-slate-400">
+                    Último: {new Date(lastAlerts.created_at).toLocaleString('pt-BR')} ·{' '}
+                    <span className={lastAlerts.status === 'success' ? 'text-green-500' : 'text-red-500'}>
+                      {lastAlerts.status === 'success' ? lastAlerts.message : lastAlerts.message}
+                    </span>
+                  </p>
+                )}
+              </div>
+              <SyncButton endpoint="/api/alerts" label="Verificar Alertas" />
             </div>
           </CardContent>
         </Card>
