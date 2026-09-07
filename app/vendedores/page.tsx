@@ -5,6 +5,11 @@ import { formatCurrency, formatPercent } from '@/lib/metrics'
 import { format, subDays, parseISO } from 'date-fns'
 import { getPerformanceVendedorDiario, getMetaVendedorMensal, proportionalMeta, getFunilVendedorAtual } from '@/lib/performance-vendedor'
 import { computeVendorScore } from '@/lib/vendor-score'
+import {
+  getDealMotivoFechamento, isLostReason, isWonReason,
+  LOST_REASONS, LOST_REASON_LABELS, WON_REASONS, WON_REASON_LABELS,
+  type LostReason, type WonReason,
+} from '@/lib/motivo-fechamento'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
@@ -34,7 +39,7 @@ export default async function VendedoresPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal, funilVendedor, resumoDiario] = await Promise.all([
+  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal, funilVendedor, resumoDiario, motivoFechamento] = await Promise.all([
     getOwnerBreakdown(supabase, accountKeys, since, until),
     getWhatsappMessages(supabase, since, until),
     getTeamPhones(supabase),
@@ -45,6 +50,7 @@ export default async function VendedoresPage({
     getMetaVendedorMensal(supabase, since, until),
     getFunilVendedorAtual(supabase),
     getResumoDiario(supabase, since, until),
+    getDealMotivoFechamento(supabase, since, until),
   ])
   const ownerNameById = Object.fromEntries(hubspotOwners.map(o => [o.id, o.name]))
 
@@ -131,6 +137,42 @@ export default async function VendedoresPage({
   const funilVendedorTotal = (r: (typeof funilVendedor)[number]) =>
     r.lead + r.orcamento + r.venda_realizada + r.venda_perdida + r.inativo
   const funilVendedorSorted = [...funilVendedor].sort((a, b) => funilVendedorTotal(b) - funilVendedorTotal(a))
+
+  // Motivo de perda/ganho por vendedor — HubSpot closed_lost_reason /
+  // closed_won_reason. Historical deals from before these became fixed
+  // dropdowns can carry stale free-text values, so anything outside the
+  // known enum falls into "outro" instead of being dropped or miscounted.
+  type ReasonCounts<T extends string> = Partial<Record<T | 'outro', number>>
+  const lostByVendor: Record<string, ReasonCounts<LostReason>> = {}
+  const wonByVendor: Record<string, ReasonCounts<WonReason>> = {}
+  const naoRetornamosByVendor: Record<string, { naoRetornamos: number; totalLost: number }> = {}
+  let totalLost = 0
+  let totalNaoRetornamos = 0
+
+  for (const d of motivoFechamento) {
+    const owner = d.vendedor?.trim() || SEM_VENDEDOR
+    if (d.dealstage === 'closedlost') {
+      const reason: LostReason | 'outro' = isLostReason(d.closed_lost_reason) ? d.closed_lost_reason : 'outro'
+      if (!lostByVendor[owner]) lostByVendor[owner] = {}
+      lostByVendor[owner][reason] = (lostByVendor[owner][reason] ?? 0) + 1
+      if (!naoRetornamosByVendor[owner]) naoRetornamosByVendor[owner] = { naoRetornamos: 0, totalLost: 0 }
+      naoRetornamosByVendor[owner].totalLost += 1
+      totalLost += 1
+      if (reason === 'nao_retornamos') {
+        naoRetornamosByVendor[owner].naoRetornamos += 1
+        totalNaoRetornamos += 1
+      }
+    } else if (d.dealstage === 'closedwon') {
+      const reason: WonReason | 'outro' = isWonReason(d.closed_won_reason) ? d.closed_won_reason : 'outro'
+      if (!wonByVendor[owner]) wonByVendor[owner] = {}
+      wonByVendor[owner][reason] = (wonByVendor[owner][reason] ?? 0) + 1
+    }
+  }
+  const lostVendorTotal = (v: string) => Object.values(lostByVendor[v] ?? {}).reduce((s, n) => s + (n ?? 0), 0)
+  const wonVendorTotal = (v: string) => Object.values(wonByVendor[v] ?? {}).reduce((s, n) => s + (n ?? 0), 0)
+  const lostVendors = Object.keys(lostByVendor).sort((a, b) => lostVendorTotal(b) - lostVendorTotal(a))
+  const wonVendors = Object.keys(wonByVendor).sort((a, b) => wonVendorTotal(b) - wonVendorTotal(a))
+  const naoRetornamosRateGeral = totalLost > 0 ? totalNaoRetornamos / totalLost : null
 
   // Funil de parceiros por vendedor — current stage per partner, grouped by
   // owner (resolved via HubSpot owner_id -> name).
@@ -344,6 +386,95 @@ export default async function VendedoresPage({
                 {funilVendedorSorted.length === 0 && (
                   <tr>
                     <td colSpan={6} className="py-6 text-center text-slate-400 text-sm">Sem dado de funil ainda</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Motivo de Perda por Vendedor · {periodLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">Por data de fechamento (closedate) no período. Valores fora das 7 categorias do HubSpot caem em &quot;Outro&quot;.</p>
+        <div className="bg-amber-50 border border-amber-300 rounded-sm p-4 mb-4">
+          <p className="text-sm font-semibold text-amber-800 mb-1">⚠ Não retornamos — 100% controlável, sem custo de mídia</p>
+          <p className="text-xs text-amber-700 mb-3">
+            {totalNaoRetornamos} de {totalLost} perdas ({naoRetornamosRateGeral !== null ? formatPercent(naoRetornamosRateGeral) : '—'}) no período foram por falta de retorno nosso, não por concorrência/preço/mercado.
+          </p>
+          {totalNaoRetornamos > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {lostVendors.filter(v => (naoRetornamosByVendor[v]?.naoRetornamos ?? 0) > 0).map(v => {
+                const nr = naoRetornamosByVendor[v]
+                const rate = nr.totalLost > 0 ? nr.naoRetornamos / nr.totalLost : null
+                return (
+                  <span key={v} className="text-xs bg-white border border-amber-200 rounded-sm px-2 py-1 text-amber-800">
+                    {v}: {nr.naoRetornamos}/{nr.totalLost} ({rate !== null ? formatPercent(rate) : '—'})
+                  </span>
+                )
+              })}
+            </div>
+          )}
+        </div>
+        <div className="bg-white rounded-sm border p-6 mb-8">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-slate-500 text-left">
+                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
+                  {LOST_REASONS.map(r => (
+                    <th key={r} className="pb-3 pr-4 font-medium text-right whitespace-nowrap">{LOST_REASON_LABELS[r]}</th>
+                  ))}
+                  <th className="pb-3 font-medium text-right">Outro</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lostVendors.map(v => (
+                  <tr key={v} className="border-b last:border-0 hover:bg-slate-50">
+                    <td className={`py-2.5 pr-4 ${v === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>{v}</td>
+                    {LOST_REASONS.map(r => (
+                      <td key={r} className={`py-2.5 pr-4 text-right ${r === 'nao_retornamos' ? 'font-semibold text-amber-700' : 'text-slate-600'}`}>
+                        {lostByVendor[v][r] ?? 0}
+                      </td>
+                    ))}
+                    <td className="py-2.5 text-right text-slate-400">{lostByVendor[v].outro ?? 0}</td>
+                  </tr>
+                ))}
+                {lostVendors.length === 0 && (
+                  <tr>
+                    <td colSpan={LOST_REASONS.length + 2} className="py-6 text-center text-slate-400 text-sm">Nenhuma venda perdida no período</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Motivo de Venda Ganha por Vendedor · {periodLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">Por data de fechamento (closedate) no período. Valores fora das 6 categorias do HubSpot caem em &quot;Outro&quot;.</p>
+        <div className="bg-white rounded-sm border p-6 mb-8">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-slate-500 text-left">
+                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
+                  {WON_REASONS.map(r => (
+                    <th key={r} className="pb-3 pr-4 font-medium text-right whitespace-nowrap">{WON_REASON_LABELS[r]}</th>
+                  ))}
+                  <th className="pb-3 font-medium text-right">Outro</th>
+                </tr>
+              </thead>
+              <tbody>
+                {wonVendors.map(v => (
+                  <tr key={v} className="border-b last:border-0 hover:bg-slate-50">
+                    <td className={`py-2.5 pr-4 ${v === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>{v}</td>
+                    {WON_REASONS.map(r => (
+                      <td key={r} className="py-2.5 pr-4 text-right text-slate-600">{wonByVendor[v][r] ?? 0}</td>
+                    ))}
+                    <td className="py-2.5 text-right text-slate-400">{wonByVendor[v].outro ?? 0}</td>
+                  </tr>
+                ))}
+                {wonVendors.length === 0 && (
+                  <tr>
+                    <td colSpan={WON_REASONS.length + 2} className="py-6 text-center text-slate-400 text-sm">Nenhuma venda ganha no período</td>
                   </tr>
                 )}
               </tbody>
