@@ -429,7 +429,11 @@ export default async function VendedoresPage({
               <tbody>
                 {lostVendors.map(v => (
                   <tr key={v} className="border-b last:border-0 hover:bg-slate-50">
-                    <td className={`py-2.5 pr-4 ${v === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>{v}</td>
+                    <td className={`py-2.5 pr-4 ${v === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>
+                      {v === SEM_VENDEDOR ? v : (
+                        <Link href={`/vendedores/${encodeURIComponent(v)}`} className="text-brand-dark-green hover:underline">{v}</Link>
+                      )}
+                    </td>
                     {LOST_REASONS.map(r => (
                       <td key={r} className={`py-2.5 pr-4 text-right ${r === 'nao_retornamos' ? 'font-semibold text-amber-700' : 'text-slate-600'}`}>
                         {lostByVendor[v][r] ?? 0}
@@ -465,7 +469,11 @@ export default async function VendedoresPage({
               <tbody>
                 {wonVendors.map(v => (
                   <tr key={v} className="border-b last:border-0 hover:bg-slate-50">
-                    <td className={`py-2.5 pr-4 ${v === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>{v}</td>
+                    <td className={`py-2.5 pr-4 ${v === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>
+                      {v === SEM_VENDEDOR ? v : (
+                        <Link href={`/vendedores/${encodeURIComponent(v)}`} className="text-brand-dark-green hover:underline">{v}</Link>
+                      )}
+                    </td>
                     {WON_REASONS.map(r => (
                       <td key={r} className="py-2.5 pr-4 text-right text-slate-600">{wonByVendor[v][r] ?? 0}</td>
                     ))}

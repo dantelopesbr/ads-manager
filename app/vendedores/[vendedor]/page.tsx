@@ -8,6 +8,8 @@ import { ptBR } from 'date-fns/locale'
 import { getPerformanceVendedorDiario, getMetaVendedorMensal } from '@/lib/performance-vendedor'
 import { getResumoDiario } from '@/lib/atividade-comercial'
 import { computeVendorScore } from '@/lib/vendor-score'
+import { getDealMotivoFechamento } from '@/lib/motivo-fechamento'
+import { DealMotivoList } from '@/components/vendedores/deal-motivo-list'
 import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
@@ -76,10 +78,13 @@ export default async function VendorReportPage({
   const nextMes = format(addMonths(parseISO(`${mes}-01`), 1), 'yyyy-MM')
   const mesLabel = format(parseISO(`${mes}-01`), 'MMMM yyyy', { locale: ptBR })
 
-  const [curr, prev] = await Promise.all([
+  const { start: mesStart, end: mesEnd } = monthRange(mes)
+  const [curr, prev, motivoFechamento] = await Promise.all([
     summarizeMonth(supabase, vendedor, mes),
     summarizeMonth(supabase, vendedor, prevMes),
+    getDealMotivoFechamento(supabase, mesStart, mesEnd),
   ])
+  const meusDeals = motivoFechamento.filter(d => (d.vendedor?.trim() || null) === vendedor)
 
   const deltaReceita = calcDelta(curr.receita, prev.receita)
   const deltaCriados = calcDelta(curr.criados, prev.criados)
@@ -142,6 +147,10 @@ export default async function VendorReportPage({
           <KpiCard title="Ligações · Clientes" value={String(curr.ligacoesCliente)} delta={deltaLigacoesCliente} />
           <KpiCard title="Ligações · Parceiros" value={String(curr.ligacoesParceiro)} delta={deltaLigacoesParceiro} />
         </div>
+
+        <h3 className="text-sm font-semibold mb-1 text-slate-600 mt-8">Deals por Motivo — {mesLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">Vendas ganhas e perdidas do mês, agrupadas por motivo — clica pra ver os deals de cada categoria.</p>
+        <DealMotivoList deals={meusDeals} />
       </main>
     </div>
   )
