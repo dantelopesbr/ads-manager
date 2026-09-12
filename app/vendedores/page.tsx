@@ -10,6 +10,7 @@ import {
   LOST_REASONS, LOST_REASON_LABELS, WON_REASONS, WON_REASON_LABELS,
   type LostReason, type WonReason,
 } from '@/lib/motivo-fechamento'
+import { getLeadCanalVendedor, isInstagramLead } from '@/lib/lead-canal'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
@@ -39,7 +40,7 @@ export default async function VendedoresPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal, funilVendedor, resumoDiario, motivoFechamento] = await Promise.all([
+  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal, funilVendedor, resumoDiario, motivoFechamento, leadCanal] = await Promise.all([
     getOwnerBreakdown(supabase, accountKeys, since, until),
     getWhatsappMessages(supabase, since, until),
     getTeamPhones(supabase),
@@ -51,6 +52,7 @@ export default async function VendedoresPage({
     getFunilVendedorAtual(supabase),
     getResumoDiario(supabase, since, until),
     getDealMotivoFechamento(supabase, since, until),
+    getLeadCanalVendedor(supabase, since, until),
   ])
   const ownerNameById = Object.fromEntries(hubspotOwners.map(o => [o.id, o.name]))
 
@@ -173,6 +175,50 @@ export default async function VendedoresPage({
   const lostVendors = Object.keys(lostByVendor).sort((a, b) => lostVendorTotal(b) - lostVendorTotal(a))
   const wonVendors = Object.keys(wonByVendor).sort((a, b) => wonVendorTotal(b) - wonVendorTotal(a))
   const naoRetornamosRateGeral = totalLost > 0 ? totalNaoRetornamos / totalLost : null
+
+  // Desempenho por canal (origem_do_lead) — geral, todos os deals do
+  // período (por create_date), não só fechados: leads/ganhos/conversão/
+  // receita/ticket médio por canal.
+  type CanalAgg = { leads: number; ganhos: number; receita: number }
+  const canalStats: Record<string, CanalAgg> = {}
+  for (const r of leadCanal) {
+    const canal = r.origem_do_lead ?? 'Sem origem'
+    if (!canalStats[canal]) canalStats[canal] = { leads: 0, ganhos: 0, receita: 0 }
+    canalStats[canal].leads += 1
+    if (r.dealstage === 'closedwon') {
+      canalStats[canal].ganhos += 1
+      canalStats[canal].receita += r.amount ?? 0
+    }
+  }
+  const canalRows = Object.entries(canalStats)
+    .map(([canal, c]) => ({
+      canal, ...c,
+      conversao: c.leads > 0 ? c.ganhos / c.leads : null,
+      ticketMedio: c.ganhos > 0 ? c.receita / c.ganhos : null,
+    }))
+    .sort((a, b) => b.leads - a.leads)
+
+  // Instagram por vendedor — mesmo recorte, filtrado pela definição
+  // confirmada (origem_do_lead + hs_analytics_source), destacado separado
+  // do breakdown geral por canal.
+  const instagramByVendor: Record<string, CanalAgg> = {}
+  for (const r of leadCanal) {
+    if (!isInstagramLead(r)) continue
+    const owner = r.vendedor?.trim() || SEM_VENDEDOR
+    if (!instagramByVendor[owner]) instagramByVendor[owner] = { leads: 0, ganhos: 0, receita: 0 }
+    instagramByVendor[owner].leads += 1
+    if (r.dealstage === 'closedwon') {
+      instagramByVendor[owner].ganhos += 1
+      instagramByVendor[owner].receita += r.amount ?? 0
+    }
+  }
+  const instagramRows = Object.entries(instagramByVendor)
+    .map(([vendedor, c]) => ({
+      vendedor, ...c,
+      conversao: c.leads > 0 ? c.ganhos / c.leads : null,
+      ticketMedio: c.ganhos > 0 ? c.receita / c.ganhos : null,
+    }))
+    .sort((a, b) => b.leads - a.leads)
 
   // Funil de parceiros por vendedor — current stage per partner, grouped by
   // owner (resolved via HubSpot owner_id -> name).
@@ -483,6 +529,81 @@ export default async function VendedoresPage({
                 {wonVendors.length === 0 && (
                   <tr>
                     <td colSpan={WON_REASONS.length + 2} className="py-6 text-center text-slate-400 text-sm">Nenhuma venda ganha no período</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Desempenho por Canal · {periodLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">Todos os leads do período por data de criação (origem_do_lead), não só os fechados. Geral, não separado por vendedor.</p>
+        <div className="bg-white rounded-sm border p-6 mb-8">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-slate-500 text-left">
+                  <th className="pb-3 pr-4 font-medium">Canal</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Leads</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Ganhos</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Conversão</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Ticket Médio</th>
+                  <th className="pb-3 font-medium text-right">Receita</th>
+                </tr>
+              </thead>
+              <tbody>
+                {canalRows.map(c => (
+                  <tr key={c.canal} className={`border-b last:border-0 hover:bg-slate-50 ${c.canal === 'Cliente Instagram' ? 'bg-violet-50/50' : ''}`}>
+                    <td className="py-2.5 pr-4 font-medium">{c.canal}</td>
+                    <td className="py-2.5 pr-4 text-right">{c.leads}</td>
+                    <td className="py-2.5 pr-4 text-right">{c.ganhos}</td>
+                    <td className="py-2.5 pr-4 text-right">{formatPercent(c.conversao)}</td>
+                    <td className="py-2.5 pr-4 text-right">{c.ticketMedio !== null ? formatCurrency(c.ticketMedio) : '—'}</td>
+                    <td className="py-2.5 text-right font-medium text-emerald-700">{formatCurrency(c.receita || null)}</td>
+                  </tr>
+                ))}
+                {canalRows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-slate-400 text-sm">Sem dado de canal no período</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Instagram por Vendedor · {periodLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">
+          &quot;Veio do Instagram&quot; = origem_do_lead &quot;Cliente Instagram&quot; + hs_analytics_source &quot;SOCIAL_MEDIA&quot; (inclui conversa que migrou pro WhatsApp
+          mas começou no Instagram) — exclui clique de anúncio pago e cadastro manual.
+        </p>
+        <div className="bg-violet-50 border border-violet-200 rounded-sm p-6">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-violet-200 text-slate-500 text-left">
+                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Leads</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Ganhos</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Conversão</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Ticket Médio</th>
+                  <th className="pb-3 font-medium text-right">Receita</th>
+                </tr>
+              </thead>
+              <tbody>
+                {instagramRows.map(r => (
+                  <tr key={r.vendedor} className="border-b border-violet-100 last:border-0">
+                    <td className="py-2.5 pr-4 font-medium text-violet-900">{r.vendedor}</td>
+                    <td className="py-2.5 pr-4 text-right">{r.leads}</td>
+                    <td className="py-2.5 pr-4 text-right">{r.ganhos}</td>
+                    <td className="py-2.5 pr-4 text-right">{formatPercent(r.conversao)}</td>
+                    <td className="py-2.5 pr-4 text-right">{r.ticketMedio !== null ? formatCurrency(r.ticketMedio) : '—'}</td>
+                    <td className="py-2.5 text-right font-medium text-emerald-700">{formatCurrency(r.receita || null)}</td>
+                  </tr>
+                ))}
+                {instagramRows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-violet-400 text-sm">Nenhum lead do Instagram no período</td>
                   </tr>
                 )}
               </tbody>
