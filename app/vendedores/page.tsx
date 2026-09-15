@@ -11,6 +11,7 @@ import {
   type LostReason, type WonReason,
 } from '@/lib/motivo-fechamento'
 import { getLeadCanalVendedor, isInstagramLead } from '@/lib/lead-canal'
+import { getSpeedToLeadVendedor, formatMinutes } from '@/lib/speed-to-lead'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
@@ -40,7 +41,7 @@ export default async function VendedoresPage({
   const selection = await getAccountSelection()
   const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal, funilVendedor, resumoDiario, motivoFechamento, leadCanal] = await Promise.all([
+  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal, funilVendedor, resumoDiario, motivoFechamento, leadCanal, speedToLead] = await Promise.all([
     getOwnerBreakdown(supabase, accountKeys, since, until),
     getWhatsappMessages(supabase, since, until),
     getTeamPhones(supabase),
@@ -53,6 +54,7 @@ export default async function VendedoresPage({
     getResumoDiario(supabase, since, until),
     getDealMotivoFechamento(supabase, since, until),
     getLeadCanalVendedor(supabase, since, until),
+    getSpeedToLeadVendedor(supabase, since, until),
   ])
   const ownerNameById = Object.fromEntries(hubspotOwners.map(o => [o.id, o.name]))
 
@@ -219,6 +221,29 @@ export default async function VendedoresPage({
       ticketMedio: c.ganhos > 0 ? c.receita / c.ganhos : null,
     }))
     .sort((a, b) => b.leads - a.leads)
+
+  // Tempo de resposta ao lead — mediana ponderada pelo volume de leads do
+  // dia (não média simples entre dias, que trataria dia de 1 lead igual a
+  // dia de 20). Mediana em vez de média porque a fonte já tem outliers reais
+  // grandes (lead esquecido por dias) que distorcem a média sozinhos.
+  type SpeedAgg = { leads: number; weightedMedianSum: number; maxDay: { data: string; minutos: number } | null }
+  const speedByVendor: Record<string, SpeedAgg> = {}
+  for (const r of speedToLead) {
+    if (!speedByVendor[r.vendedor]) speedByVendor[r.vendedor] = { leads: 0, weightedMedianSum: 0, maxDay: null }
+    const agg = speedByVendor[r.vendedor]
+    agg.leads += r.qtd_leads_respondidos
+    agg.weightedMedianSum += r.tempo_resposta_mediana_minutos * r.qtd_leads_respondidos
+    if (!agg.maxDay || r.tempo_resposta_mediana_minutos > agg.maxDay.minutos) {
+      agg.maxDay = { data: r.data, minutos: r.tempo_resposta_mediana_minutos }
+    }
+  }
+  const speedRows = Object.entries(speedByVendor)
+    .map(([vendedor, a]) => {
+      const medianaPonderada = a.leads > 0 ? a.weightedMedianSum / a.leads : null
+      const isOutlier = a.maxDay !== null && medianaPonderada !== null && a.maxDay.minutos > medianaPonderada * 3
+      return { vendedor, leads: a.leads, medianaPonderada, maxDay: a.maxDay, isOutlier }
+    })
+    .sort((a, b) => (a.medianaPonderada ?? Infinity) - (b.medianaPonderada ?? Infinity))
 
   // Funil de parceiros por vendedor — current stage per partner, grouped by
   // owner (resolved via HubSpot owner_id -> name).
@@ -604,6 +629,49 @@ export default async function VendedoresPage({
                 {instagramRows.length === 0 && (
                   <tr>
                     <td colSpan={6} className="py-6 text-center text-violet-400 text-sm">Nenhum lead do Instagram no período</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Tempo de Resposta ao Lead · {periodLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">
+          Mediana ponderada pelo volume de leads de cada dia (não média entre dias). &quot;Pior dia&quot; sinalizado quando
+          passa de 3x a mediana do vendedor — a fonte tem casos reais de dias de atraso que distorcem uma média simples.
+        </p>
+        <div className="bg-white rounded-sm border p-6 mb-8">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-slate-500 text-left">
+                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Leads Respondidos</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Tempo de Resposta (mediana)</th>
+                  <th className="pb-3 font-medium text-right">Pior Dia</th>
+                </tr>
+              </thead>
+              <tbody>
+                {speedRows.map(s => (
+                  <tr key={s.vendedor} className="border-b last:border-0 hover:bg-slate-50">
+                    <td className="py-2.5 pr-4 font-medium">{s.vendedor}</td>
+                    <td className="py-2.5 pr-4 text-right">{s.leads}</td>
+                    <td className="py-2.5 pr-4 text-right font-semibold">
+                      {s.medianaPonderada !== null ? formatMinutes(s.medianaPonderada) : '—'}
+                    </td>
+                    <td className="py-2.5 text-right">
+                      {s.maxDay ? (
+                        <span className={s.isOutlier ? 'text-red-600 font-medium' : 'text-slate-500'}>
+                          {s.isOutlier && '⚠ '}{formatMinutes(s.maxDay.minutos)} ({new Date(s.maxDay.data).toLocaleDateString('pt-BR')})
+                        </span>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                ))}
+                {speedRows.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-slate-400 text-sm">Sem dado de tempo de resposta no período</td>
                   </tr>
                 )}
               </tbody>
