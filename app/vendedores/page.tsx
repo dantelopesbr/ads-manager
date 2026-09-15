@@ -125,6 +125,13 @@ export default async function VendedoresPage({
     byOwner[owner].valueWon += r.deal_value_won ?? 0
   }
 
+  // Sempre lista os vendedores conhecidos (fonte: funil, que cobre todo mundo
+  // com histórico de deal) mesmo com zero leads de anúncio no período — não
+  // deixa quem não teve lead de ads sumir da tabela silenciosamente.
+  for (const f of funilVendedor) {
+    if (!byOwner[f.vendedor]) byOwner[f.vendedor] = { leads: 0, deals: 0, won: 0, valueProjected: 0, valueWon: 0 }
+  }
+
   const owners = Object.entries(byOwner)
     .map(([name, a]) => ({
       name,
@@ -326,7 +333,12 @@ export default async function VendedoresPage({
             <DateFilter from={since ?? ''} to={until} />
           </Suspense>
         </div>
-        <p className="text-sm text-slate-500 mb-6">{periodLabel} · {totalLeads} leads · {owners.length} vendedor{owners.length !== 1 ? 'es' : ''}</p>
+        <p className="text-sm text-slate-500 mb-1">{periodLabel} · {totalLeads} leads · {owners.length} vendedor{owners.length !== 1 ? 'es' : ''}</p>
+        <h3 className="text-sm font-semibold mt-3 mb-1 text-slate-600">Leads de Anúncio por Vendedor</h3>
+        <p className="text-xs text-slate-400 mb-4">
+          Só leads com clique rastreado de anúncio Meta (não é todo lead do HubSpot) — vendedor sem lead de
+          anúncio no período aparece zerado, não some da lista.
+        </p>
 
         <div className="bg-white rounded-sm border p-6">
           <div className="overflow-x-auto">
