@@ -38,7 +38,33 @@ export interface HubspotContact {
   hs_contact_id: string | null
   lifecycle_stage: string | null
   deal_value: number | null
+  deal_value_won: number | null
   deal_stage: string | null
+  owner_id: string | null
+  owner_name: string | null
+  contact_owner_id: string | null
+  contact_owner_name: string | null
+  updated_at: string
+}
+
+export interface HubspotCall {
+  id: number
+  hs_call_id: string
+  phone: string
+  owner_id: string | null
+  owner_name: string | null
+  call_at: string
+  direction: string | null
+  disposition: string | null
+  synced_at: string
+}
+
+export interface AccountTarget {
+  account: string
+  cpl_target: number | null
+  roas_target: number | null
+  cpl_alert_multiplier: number
+  ctr_alert_min: number
   updated_at: string
 }
 

@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import { fetchMetaInsights, MetaInsightRaw } from './client'
 import { format, subDays } from 'date-fns'
+import type { AccountKey } from '@/lib/account'
 
 function getSyncWindow(isFirstSync: boolean): { since: string; until: string } {
   const today = new Date()
@@ -9,8 +10,9 @@ function getSyncWindow(isFirstSync: boolean): { since: string; until: string } {
   return { since, until }
 }
 
-function toInsightRow(raw: MetaInsightRaw) {
+function toInsightRow(raw: MetaInsightRaw, account: AccountKey) {
   return {
+    account,
     date: raw.date_start,
     campaign_id: raw.campaign_id,
     campaign_name: raw.campaign_name,
@@ -25,25 +27,27 @@ function toInsightRow(raw: MetaInsightRaw) {
   }
 }
 
-export async function syncMetaInsights(supabase: SupabaseClient): Promise<number> {
-  const accessToken = process.env.META_ACCESS_TOKEN!
-  const adAccountId = process.env.META_AD_ACCOUNT_ID!
-
-  // Detect first sync by checking if any rows exist
+export async function syncMetaInsights(
+  supabase: SupabaseClient,
+  account: AccountKey,
+  accessToken: string,
+  adAccountId: string
+): Promise<number> {
   const { count } = await supabase
     .from('meta_insights')
     .select('*', { count: 'exact', head: true })
+    .eq('account', account)
   const isFirstSync = count === 0
 
   const { since, until } = getSyncWindow(isFirstSync)
   const raw = await fetchMetaInsights(accessToken, adAccountId, since, until)
-  const rows = raw.map(toInsightRow)
+  const rows = raw.map(r => toInsightRow(r, account))
 
   if (rows.length === 0) return 0
 
   const { error } = await supabase
     .from('meta_insights')
-    .upsert(rows, { onConflict: 'date,campaign_id,adset_id,ad_id' })
+    .upsert(rows, { onConflict: 'date,campaign_id,adset_id,ad_id,account' })
 
   if (error) throw new Error(`Supabase upsert error: ${error.message}`)
 
