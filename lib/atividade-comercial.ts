@@ -76,16 +76,31 @@ export interface ParceiroStatusRow {
   data_snapshot: string
 }
 
+/**
+ * Paginated — a wide date range easily exceeds PostgREST's 1000-row default
+ * cap (one row per partner per day), and callers that reduce this to "most
+ * recent snapshot per contact" need every row, not just whatever order the
+ * unindexed first page happens to return before truncation.
+ */
 export async function getParceiroStatusLog(
   supabase: SupabaseClient, since: string, until: string
 ): Promise<ParceiroStatusRow[]> {
-  const { data, error } = await supabase
-    .from('[FH]parceiro_status_log')
-    .select('contact_id, nome, owner_id, estagio, negocios_fechados, dias_desde_contato, data_snapshot')
-    .gte('data_snapshot', since)
-    .lte('data_snapshot', until)
-  if (error) throw error
-  return data ?? []
+  const rows: ParceiroStatusRow[] = []
+  const pageSize = 1000
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('[FH]parceiro_status_log')
+      .select('contact_id, nome, owner_id, estagio, negocios_fechados, dias_desde_contato, data_snapshot')
+      .gte('data_snapshot', since)
+      .lte('data_snapshot', until)
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    rows.push(...(data ?? []))
+    if (!data || data.length < pageSize) break
+    from += pageSize
+  }
+  return rows
 }
 
 export const PARCEIRO_ESTAGIOS: ParceiroEstagio[] = [

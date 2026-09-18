@@ -3,23 +3,24 @@ import { Nav } from '@/components/nav'
 import { DateFilter } from '@/components/date-filter'
 import { formatCurrency, formatPercent } from '@/lib/metrics'
 import { format, subDays, parseISO } from 'date-fns'
-import { getPerformanceVendedorDiario, getMetaVendedorMensal, proportionalMeta, getFunilVendedorAtual } from '@/lib/performance-vendedor'
+import { getPerformanceVendedorDiario, getMetaVendedorMensal, proportionalMeta } from '@/lib/performance-vendedor'
 import { computeVendorScore } from '@/lib/vendor-score'
 import {
-  getDealMotivoFechamento, isLostReason, isWonReason,
-  LOST_REASONS, LOST_REASON_LABELS, WON_REASONS, WON_REASON_LABELS,
-  type LostReason, type WonReason,
+  getDealMotivoFechamento, isLostReason,
+  type LostReason,
 } from '@/lib/motivo-fechamento'
-import { getLeadCanalVendedor, isInstagramLead } from '@/lib/lead-canal'
+import { getLeadCanalVendedor } from '@/lib/lead-canal'
 import { getSpeedToLeadVendedor, formatMinutes } from '@/lib/speed-to-lead'
+import { bucketDealStage, FUNNEL_STAGES } from '@/lib/deal-stages'
+import { KpiCard } from '@/components/dashboard/kpi-card'
+import { VendorRankingTable, type VendorRankingRow } from '@/components/vendedores/vendor-ranking-table'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import { getAccountSelection } from '@/lib/account-server'
-import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
-import { getOwnerBreakdown, getWhatsappMessages, getTeamPhones, getCalls } from '@/lib/queries'
+import { getWhatsappMessages, getTeamPhones, getCalls } from '@/lib/queries'
 import { classifyMessage, buildTeamPhoneIndex, normalizePhoneSuffix, KNOWN_VENDORS, IA_VENDORS } from '@/lib/whatsapp-team'
 import { ActivityChart } from '@/components/vendedores/activity-chart'
-import { getPartnerCurrentStatus, getResumoDiario, PARCEIRO_ESTAGIOS, PARCEIRO_ESTAGIO_LABELS, type ParceiroEstagio } from '@/lib/atividade-comercial'
+import { getParceiroStatusLog, getResumoDiario, PARCEIRO_ESTAGIOS, PARCEIRO_ESTAGIO_LABELS, type ParceiroEstagio } from '@/lib/atividade-comercial'
 import { fetchOwners } from '@/lib/hubspot/client'
 
 export const dynamic = 'force-dynamic'
@@ -39,23 +40,30 @@ export default async function VendedoresPage({
   const until = to ?? today
 
   const selection = await getAccountSelection()
-  const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
 
-  const [rows, messages, teamPhones, calls, partnerCurrent, hubspotOwners, performanceDiario, metaMensal, funilVendedor, resumoDiario, motivoFechamento, leadCanal, speedToLead] = await Promise.all([
-    getOwnerBreakdown(supabase, accountKeys, since, until),
+  const [messages, teamPhones, calls, parceiroStatusLog, hubspotOwners, performanceDiario, metaMensal, resumoDiario, motivoFechamento, leadCanal, speedToLead] = await Promise.all([
     getWhatsappMessages(supabase, since, until),
     getTeamPhones(supabase),
     getCalls(supabase, since, until),
-    getPartnerCurrentStatus(supabase),
+    getParceiroStatusLog(supabase, since, until),
     fetchOwners(process.env.HUBSPOT_API_KEY!).catch(() => []),
     getPerformanceVendedorDiario(supabase, since, until),
     getMetaVendedorMensal(supabase, since, until),
-    getFunilVendedorAtual(supabase),
     getResumoDiario(supabase, since, until),
     getDealMotivoFechamento(supabase, since, until),
     getLeadCanalVendedor(supabase, since, until),
     getSpeedToLeadVendedor(supabase, since, until),
   ])
+
+  // Funil de Parceiros por Vendedor precisa refletir o período selecionado
+  // (não "hoje") — reduz o log diário ao snapshot mais recente de cada
+  // parceiro DENTRO do período, em vez do estado atual fixo.
+  const partnerCurrent = [...parceiroStatusLog]
+    .sort((a, b) => b.data_snapshot.localeCompare(a.data_snapshot))
+    .reduce((acc, row) => {
+      if (!acc.seen.has(row.contact_id)) { acc.seen.add(row.contact_id); acc.rows.push(row) }
+      return acc
+    }, { seen: new Set<string>(), rows: [] as typeof parceiroStatusLog }).rows
   const ownerNameById = Object.fromEntries(hubspotOwners.map(o => [o.id, o.name]))
 
   const teamIndex = buildTeamPhoneIndex(teamPhones)
@@ -113,121 +121,49 @@ export default async function VendedoresPage({
     return row
   })
 
-  type OwnerAgg = { leads: number; deals: number; won: number; valueProjected: number; valueWon: number }
-  const byOwner: Record<string, OwnerAgg> = {}
-  for (const r of rows) {
-    const owner = r.owner_name ?? SEM_VENDEDOR
-    if (!byOwner[owner]) byOwner[owner] = { leads: 0, deals: 0, won: 0, valueProjected: 0, valueWon: 0 }
-    byOwner[owner].leads += 1
-    if (r.deal_stage) byOwner[owner].deals += 1
-    if (r.deal_value_won) byOwner[owner].won += 1
-    byOwner[owner].valueProjected += r.deal_value ?? 0
-    byOwner[owner].valueWon += r.deal_value_won ?? 0
-  }
-
-  // Sempre lista os vendedores conhecidos (fonte: funil, que cobre todo mundo
-  // com histórico de deal) mesmo com zero leads de anúncio no período — não
-  // deixa quem não teve lead de ads sumir da tabela silenciosamente.
-  for (const f of funilVendedor) {
-    if (!byOwner[f.vendedor]) byOwner[f.vendedor] = { leads: 0, deals: 0, won: 0, valueProjected: 0, valueWon: 0 }
-  }
-
-  const owners = Object.entries(byOwner)
-    .map(([name, a]) => ({
-      name,
-      ...a,
-      closingRate: a.deals > 0 ? a.won / a.deals : null,
-    }))
-    .sort((a, b) => b.valueWon - a.valueWon)
-
-  const totalLeads = owners.reduce((s, o) => s + o.leads, 0)
+  // Vendedores conhecidos no período (fonte: canal, que cobre todo mundo com
+  // deal criado) — usado pra não deixar quem ficou zerado em algo sumir
+  // silenciosamente das tabelas.
+  const knownVendorNames = [...new Set(leadCanal.map(r => r.vendedor?.trim()).filter((v): v is string => !!v))]
   const periodLabel = `${since} → ${until}`
 
-  // Funil de vendas por vendedor — current count per stage, straight from
-  // HubSpot deals_raw via the BigQuery pipeline (see getFunilVendedorAtual).
-  const funilVendedorTotal = (r: (typeof funilVendedor)[number]) =>
-    r.lead + r.orcamento + r.venda_realizada + r.venda_perdida + r.inativo
-  const funilVendedorSorted = [...funilVendedor].sort((a, b) => funilVendedorTotal(b) - funilVendedorTotal(a))
+  // Funil de vendas por vendedor — estágio de cada deal CRIADO no período
+  // selecionado (não "estado atual" fixo), pra reagir ao filtro de data
+  // como o resto da página.
+  type FunilCounts = Partial<Record<(typeof FUNNEL_STAGES)[number]['bucket'], number>>
+  const funilByVendor: Record<string, FunilCounts> = {}
+  for (const r of leadCanal) {
+    const owner = r.vendedor?.trim() || SEM_VENDEDOR
+    const bucket = bucketDealStage(r.dealstage)
+    if (bucket === 'Outro') continue
+    if (!funilByVendor[owner]) funilByVendor[owner] = {}
+    funilByVendor[owner][bucket] = (funilByVendor[owner][bucket] ?? 0) + 1
+  }
+  const funilVendorTotal = (v: string) => Object.values(funilByVendor[v] ?? {}).reduce((s, n) => s + (n ?? 0), 0)
+  const funilVendedorSorted = Object.keys(funilByVendor).sort((a, b) => funilVendorTotal(b) - funilVendorTotal(a))
 
-  // Motivo de perda/ganho por vendedor — HubSpot closed_lost_reason /
-  // closed_won_reason. Historical deals from before these became fixed
-  // dropdowns can carry stale free-text values, so anything outside the
-  // known enum falls into "outro" instead of being dropped or miscounted.
-  type ReasonCounts<T extends string> = Partial<Record<T | 'outro', number>>
-  const lostByVendor: Record<string, ReasonCounts<LostReason>> = {}
-  const wonByVendor: Record<string, ReasonCounts<WonReason>> = {}
+  // Não retornamos — a única categoria de motivo de perda que fica visível
+  // no topo (destaque de ação imediata); o breakdown completo de motivo de
+  // perda/ganho/canal virou drill-down por vendedor em /vendedores/[vendedor].
   const naoRetornamosByVendor: Record<string, { naoRetornamos: number; totalLost: number }> = {}
   let totalLost = 0
   let totalNaoRetornamos = 0
-
   for (const d of motivoFechamento) {
+    if (d.dealstage !== 'closedlost') continue
     const owner = d.vendedor?.trim() || SEM_VENDEDOR
-    if (d.dealstage === 'closedlost') {
-      const reason: LostReason | 'outro' = isLostReason(d.closed_lost_reason) ? d.closed_lost_reason : 'outro'
-      if (!lostByVendor[owner]) lostByVendor[owner] = {}
-      lostByVendor[owner][reason] = (lostByVendor[owner][reason] ?? 0) + 1
-      if (!naoRetornamosByVendor[owner]) naoRetornamosByVendor[owner] = { naoRetornamos: 0, totalLost: 0 }
-      naoRetornamosByVendor[owner].totalLost += 1
-      totalLost += 1
-      if (reason === 'nao_retornamos') {
-        naoRetornamosByVendor[owner].naoRetornamos += 1
-        totalNaoRetornamos += 1
-      }
-    } else if (d.dealstage === 'closedwon') {
-      const reason: WonReason | 'outro' = isWonReason(d.closed_won_reason) ? d.closed_won_reason : 'outro'
-      if (!wonByVendor[owner]) wonByVendor[owner] = {}
-      wonByVendor[owner][reason] = (wonByVendor[owner][reason] ?? 0) + 1
+    const reason: LostReason | 'outro' = isLostReason(d.closed_lost_reason) ? d.closed_lost_reason : 'outro'
+    if (!naoRetornamosByVendor[owner]) naoRetornamosByVendor[owner] = { naoRetornamos: 0, totalLost: 0 }
+    naoRetornamosByVendor[owner].totalLost += 1
+    totalLost += 1
+    if (reason === 'nao_retornamos') {
+      naoRetornamosByVendor[owner].naoRetornamos += 1
+      totalNaoRetornamos += 1
     }
   }
-  const lostVendorTotal = (v: string) => Object.values(lostByVendor[v] ?? {}).reduce((s, n) => s + (n ?? 0), 0)
-  const wonVendorTotal = (v: string) => Object.values(wonByVendor[v] ?? {}).reduce((s, n) => s + (n ?? 0), 0)
-  const lostVendors = Object.keys(lostByVendor).sort((a, b) => lostVendorTotal(b) - lostVendorTotal(a))
-  const wonVendors = Object.keys(wonByVendor).sort((a, b) => wonVendorTotal(b) - wonVendorTotal(a))
   const naoRetornamosRateGeral = totalLost > 0 ? totalNaoRetornamos / totalLost : null
-
-  // Desempenho por canal (origem_do_lead) — geral, todos os deals do
-  // período (por create_date), não só fechados: leads/ganhos/conversão/
-  // receita/ticket médio por canal.
-  type CanalAgg = { leads: number; ganhos: number; receita: number }
-  const canalStats: Record<string, CanalAgg> = {}
-  for (const r of leadCanal) {
-    const canal = r.origem_do_lead ?? 'Sem origem'
-    if (!canalStats[canal]) canalStats[canal] = { leads: 0, ganhos: 0, receita: 0 }
-    canalStats[canal].leads += 1
-    if (r.dealstage === 'closedwon') {
-      canalStats[canal].ganhos += 1
-      canalStats[canal].receita += r.amount ?? 0
-    }
-  }
-  const canalRows = Object.entries(canalStats)
-    .map(([canal, c]) => ({
-      canal, ...c,
-      conversao: c.leads > 0 ? c.ganhos / c.leads : null,
-      ticketMedio: c.ganhos > 0 ? c.receita / c.ganhos : null,
-    }))
-    .sort((a, b) => b.leads - a.leads)
-
-  // Instagram por vendedor — mesmo recorte, filtrado pela definição
-  // confirmada (origem_do_lead + hs_analytics_source), destacado separado
-  // do breakdown geral por canal.
-  const instagramByVendor: Record<string, CanalAgg> = {}
-  for (const r of leadCanal) {
-    if (!isInstagramLead(r)) continue
-    const owner = r.vendedor?.trim() || SEM_VENDEDOR
-    if (!instagramByVendor[owner]) instagramByVendor[owner] = { leads: 0, ganhos: 0, receita: 0 }
-    instagramByVendor[owner].leads += 1
-    if (r.dealstage === 'closedwon') {
-      instagramByVendor[owner].ganhos += 1
-      instagramByVendor[owner].receita += r.amount ?? 0
-    }
-  }
-  const instagramRows = Object.entries(instagramByVendor)
-    .map(([vendedor, c]) => ({
-      vendedor, ...c,
-      conversao: c.leads > 0 ? c.ganhos / c.leads : null,
-      ticketMedio: c.ganhos > 0 ? c.receita / c.ganhos : null,
-    }))
-    .sort((a, b) => b.leads - a.leads)
+  const naoRetornamosVendors = Object.keys(naoRetornamosByVendor)
+    .filter(v => naoRetornamosByVendor[v].naoRetornamos > 0)
+    .sort((a, b) => naoRetornamosByVendor[b].naoRetornamos - naoRetornamosByVendor[a].naoRetornamos)
 
   // Tempo de resposta ao lead — mediana ponderada pelo volume de leads do
   // dia (não média simples entre dias, que trataria dia de 1 lead igual a
@@ -316,6 +252,44 @@ export default async function VendedoresPage({
     })
     .sort((a, b) => b.receita - a.receita)
 
+  // KPIs gerais do período — contexto antes de qualquer detalhe por
+  // vendedor. Leads/conversão vêm de leadCanal (todos os deals criados no
+  // período, fonte mais completa); receita/ticket vêm de performanceDiario
+  // (mesma fonte já usada na tabela financeira, pra não ter dois números de
+  // receita ligeiramente diferentes na mesma página).
+  const totalLeadsGeral = leadCanal.length
+  const totalGanhosGeral = leadCanal.filter(r => r.dealstage === 'closedwon').length
+  const conversaoGeral = totalLeadsGeral > 0 ? totalGanhosGeral / totalLeadsGeral : null
+  const receitaGeral = financeRows.reduce((s, f) => s + f.receita, 0)
+  const ganhosPerformanceGeral = financeRows.reduce((s, f) => s + f.ganhos, 0)
+  const ticketMedioGeral = ganhosPerformanceGeral > 0 ? receitaGeral / ganhosPerformanceGeral : null
+  const speedLeadsGeralTotal = speedToLead.reduce((s, r) => s + r.qtd_leads_respondidos, 0)
+  const speedGeralWeightedSum = speedToLead.reduce((s, r) => s + r.tempo_resposta_mediana_minutos * r.qtd_leads_respondidos, 0)
+  const tempoRespostaGeral = speedLeadsGeralTotal > 0 ? speedGeralWeightedSum / speedLeadsGeralTotal : null
+
+  // Comparativo entre vendedores — visão central, uma linha por vendedor,
+  // juntando financeiro/score (já existentes) + tempo de resposta + taxa de
+  // não retornamos, pra não espalhar a mesma pessoa em 3 tabelas diferentes.
+  const rankingRows: VendorRankingRow[] = financeRows
+    .filter(f => f.vendedor !== SEM_VENDEDOR)
+    .map(f => {
+      const speed = speedByVendor[f.vendedor]
+      const nr = naoRetornamosByVendor[f.vendedor]
+      return {
+        vendedor: f.vendedor,
+        criados: f.criados,
+        ganhos: f.ganhos,
+        conversao: f.conversao,
+        ticketMedio: f.ticketMedio,
+        receita: f.receita,
+        atingimento: f.atingimento,
+        score: f.score,
+        hasConversaoScore: f.hasConversaoScore,
+        tempoResposta: speed && speed.leads > 0 ? speed.weightedMedianSum / speed.leads : null,
+        naoRetornamosRate: nr && nr.totalLost > 0 ? nr.naoRetornamos / nr.totalLost : null,
+      }
+    })
+
   return (
     <div className="flex">
       <Nav />
@@ -333,114 +307,69 @@ export default async function VendedoresPage({
             <DateFilter from={since ?? ''} to={until} />
           </Suspense>
         </div>
-        <p className="text-sm text-slate-500 mb-1">{periodLabel} · {totalLeads} leads · {owners.length} vendedor{owners.length !== 1 ? 'es' : ''}</p>
-        <h3 className="text-sm font-semibold mt-3 mb-1 text-slate-600">Leads de Anúncio por Vendedor</h3>
-        <p className="text-xs text-slate-400 mb-4">
-          Só leads com clique rastreado de anúncio Meta (não é todo lead do HubSpot) — vendedor sem lead de
-          anúncio no período aparece zerado, não some da lista.
-        </p>
+        <p className="text-sm text-slate-500 mb-6">{periodLabel} · {knownVendorNames.length} vendedor{knownVendorNames.length !== 1 ? 'es' : ''}</p>
 
-        <div className="bg-white rounded-sm border p-6">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-slate-500 text-left">
-                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Leads</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Deals</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Taxa Fechamento</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Valor Projetado</th>
-                  <th className="pb-3 font-medium text-right">Valor Fechado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {owners.map(o => (
-                  <tr key={o.name} className="border-b hover:bg-slate-50">
-                    <td className={`py-3 pr-4 font-medium ${o.name === SEM_VENDEDOR ? 'text-slate-400 font-normal' : ''}`}>
-                      {o.name}
-                    </td>
-                    <td className="py-3 pr-4 text-right">{o.leads}</td>
-                    <td className="py-3 pr-4 text-right">{o.deals}</td>
-                    <td className="py-3 pr-4 text-right">{formatPercent(o.closingRate)}</td>
-                    <td className="py-3 pr-4 text-right">{formatCurrency(o.valueProjected || null)}</td>
-                    <td className="py-3 text-right font-medium text-emerald-700">{formatCurrency(o.valueWon || null)}</td>
-                  </tr>
-                ))}
-                {owners.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="py-8 text-center text-slate-400 text-sm">Nenhum lead no período</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+          <KpiCard title="Total de Leads" value={String(totalLeadsGeral)} subtitle="deals criados no período" />
+          <KpiCard title="Conversão Geral" value={formatPercent(conversaoGeral)} subtitle={`${totalGanhosGeral} ganhos`} />
+          <KpiCard title="Receita Fechada" value={formatCurrency(receitaGeral || null)} />
+          <KpiCard title="Ticket Médio" value={ticketMedioGeral !== null ? formatCurrency(ticketMedioGeral) : '—'} />
+          <KpiCard title="Tempo de Resposta" value={tempoRespostaGeral !== null ? formatMinutes(tempoRespostaGeral) : '—'} subtitle="mediana ponderada" />
         </div>
 
-        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Financeiro por Vendedor · {periodLabel}</h3>
+        {(naoRetornamosVendors.length > 0 || speedRows.some(s => s.isOutlier)) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+            {naoRetornamosVendors.length > 0 && (
+              <div className="bg-amber-50 border border-amber-300 rounded-sm p-4">
+                <p className="text-sm font-semibold text-amber-800 mb-1">⚠ Não retornamos — 100% controlável, sem custo de mídia</p>
+                <p className="text-xs text-amber-700 mb-3">
+                  {totalNaoRetornamos} de {totalLost} perdas ({naoRetornamosRateGeral !== null ? formatPercent(naoRetornamosRateGeral) : '—'}) no
+                  período foram por falta de retorno nosso, não por concorrência/preço/mercado.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {naoRetornamosVendors.map(v => {
+                    const nr = naoRetornamosByVendor[v]
+                    const rate = nr.totalLost > 0 ? nr.naoRetornamos / nr.totalLost : null
+                    return (
+                      <Link key={v} href={`/vendedores/${encodeURIComponent(v)}`} className="text-xs bg-white border border-amber-200 rounded-sm px-2 py-1 text-amber-800 hover:underline">
+                        {v}: {nr.naoRetornamos}/{nr.totalLost} ({rate !== null ? formatPercent(rate) : '—'})
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+            {speedRows.some(s => s.isOutlier) && (
+              <div className="bg-red-50 border border-red-300 rounded-sm p-4">
+                <p className="text-sm font-semibold text-red-800 mb-1">⚠ Outliers de tempo de resposta</p>
+                <p className="text-xs text-red-700 mb-3">Dias isolados que passaram muito da mediana do próprio vendedor — vale conferir caso a caso.</p>
+                <div className="flex flex-wrap gap-2">
+                  {speedRows.filter(s => s.isOutlier && s.maxDay).map(s => (
+                    <Link key={s.vendedor} href={`/vendedores/${encodeURIComponent(s.vendedor)}`} className="text-xs bg-white border border-red-200 rounded-sm px-2 py-1 text-red-800 hover:underline">
+                      {s.vendedor}: {formatMinutes(s.maxDay!.minutos)} em {new Date(s.maxDay!.data).toLocaleDateString('pt-BR')}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <h3 className="text-sm font-semibold mt-2 mb-2 text-slate-600">Comparativo entre Vendedores · {periodLabel}</h3>
         <p className="text-xs text-slate-400 mb-4">
-          Receita fechada via HubSpot (closedwon) · meta proporcional aos dias do período dentro de cada mês.
           Score = Meta (peso 50, capado em 100) + Conversão (peso 30, só com 5+ deals criados no período) +
           Atividade (peso 20, ranking de conversas+ligações dentro do time) — peso redistribuído quando um
-          componente fica de fora.
+          componente fica de fora. Clica no nome ou em &quot;Ver relatório&quot; pra abrir o detalhe do vendedor
+          (motivo de perda/ganho, canal de origem, deals do mês).
         </p>
         <div className="bg-white rounded-sm border p-6">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-slate-500 text-left">
-                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Deals Criados</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Deals Ganhos</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Conversão</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Ticket Médio</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Receita Fechada</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Meta (proporcional)</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Atingimento</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Score</th>
-                  <th className="pb-3 font-medium text-right">Relatório</th>
-                </tr>
-              </thead>
-              <tbody>
-                {financeRows.map(f => (
-                  <tr key={f.vendedor} className="border-b last:border-0 hover:bg-slate-50">
-                    <td className="py-2.5 pr-4 font-medium">{f.vendedor}</td>
-                    <td className="py-2.5 pr-4 text-right">{f.criados}</td>
-                    <td className="py-2.5 pr-4 text-right">{f.ganhos}</td>
-                    <td className="py-2.5 pr-4 text-right">{formatPercent(f.conversao)}</td>
-                    <td className="py-2.5 pr-4 text-right">{f.ticketMedio !== null ? formatCurrency(f.ticketMedio) : '—'}</td>
-                    <td className="py-2.5 pr-4 text-right font-medium text-emerald-700">{formatCurrency(f.receita || null)}</td>
-                    <td className="py-2.5 pr-4 text-right text-slate-500">
-                      {f.metaProporcional !== null ? formatCurrency(f.metaProporcional) : 'meta não definida'}
-                    </td>
-                    <td className="py-2.5 pr-4 text-right font-medium">
-                      {f.atingimento !== null ? formatPercent(f.atingimento) : '—'}
-                    </td>
-                    <td className="py-2.5 pr-4 text-right font-semibold">
-                      {f.score !== null ? f.score.toFixed(0) : '—'}
-                      {!f.hasConversaoScore && f.score !== null && <span className="text-slate-400 font-normal">*</span>}
-                    </td>
-                    <td className="py-2.5 text-right">
-                      <Link href={`/vendedores/${encodeURIComponent(f.vendedor)}`} className="text-brand-dark-green hover:underline text-xs font-medium">
-                        Ver relatório
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-                {financeRows.length === 0 && (
-                  <tr>
-                    <td colSpan={10} className="py-6 text-center text-slate-400 text-sm">Sem dado financeiro no período</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <VendorRankingTable rows={rankingRows} />
           <p className="text-[11px] text-slate-400 mt-3">* menos de 5 deals criados no período — conversão fora do score, peso redistribuído entre Meta e Atividade.</p>
         </div>
 
-        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Vendas por Vendedor</h3>
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Vendas por Vendedor · {periodLabel}</h3>
         <p className="text-xs text-slate-400 mb-4">
-          Estado atual (não filtrado por período) — quantos negócios estão em cada estágio hoje, contados
-          direto do HubSpot (via BigQuery), não do filtro de data acima.
+          Estágio de cada deal criado no período selecionado — reage ao filtro de data como o resto da página.
         </p>
         <div className="bg-white rounded-sm border p-6">
           <div className="overflow-x-auto">
@@ -448,27 +377,25 @@ export default async function VendedoresPage({
               <thead>
                 <tr className="border-b text-slate-500 text-left">
                   <th className="pb-3 pr-4 font-medium">Vendedor</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Lead</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Inativo</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Orçamento</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Venda Realizada</th>
-                  <th className="pb-3 font-medium text-right">Venda Perdida</th>
+                  {FUNNEL_STAGES.map(s => (
+                    <th key={s.bucket} className="pb-3 pr-4 font-medium text-right">{s.bucket}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {funilVendedorSorted.map(f => (
-                  <tr key={f.vendedor} className="border-b last:border-0 hover:bg-slate-50">
-                    <td className="py-2.5 pr-4 font-medium">{f.vendedor}</td>
-                    <td className="py-2.5 pr-4 text-right text-slate-600">{f.lead}</td>
-                    <td className="py-2.5 pr-4 text-right text-slate-600">{f.inativo}</td>
-                    <td className="py-2.5 pr-4 text-right font-semibold text-amber-700">{f.orcamento}</td>
-                    <td className="py-2.5 pr-4 text-right font-medium text-emerald-700">{f.venda_realizada}</td>
-                    <td className="py-2.5 text-right text-slate-600">{f.venda_perdida}</td>
+                {funilVendedorSorted.map(vendedor => (
+                  <tr key={vendedor} className="border-b last:border-0 hover:bg-slate-50">
+                    <td className="py-2.5 pr-4 font-medium">{vendedor}</td>
+                    {FUNNEL_STAGES.map(s => (
+                      <td key={s.bucket} className={`py-2.5 pr-4 text-right ${s.bucket === 'Orçamento' ? 'font-semibold text-amber-700' : s.bucket === 'Venda Realizada' ? 'font-medium text-emerald-700' : 'text-slate-600'}`}>
+                        {funilByVendor[vendedor]?.[s.bucket] ?? 0}
+                      </td>
+                    ))}
                   </tr>
                 ))}
                 {funilVendedorSorted.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-6 text-center text-slate-400 text-sm">Sem dado de funil ainda</td>
+                    <td colSpan={FUNNEL_STAGES.length + 1} className="py-6 text-center text-slate-400 text-sm">Nenhum deal criado no período</td>
                   </tr>
                 )}
               </tbody>
@@ -476,223 +403,8 @@ export default async function VendedoresPage({
           </div>
         </div>
 
-        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Motivo de Perda por Vendedor · {periodLabel}</h3>
-        <p className="text-xs text-slate-400 mb-4">Por data de fechamento (closedate) no período. Valores fora das 7 categorias do HubSpot caem em &quot;Outro&quot;.</p>
-        <div className="bg-amber-50 border border-amber-300 rounded-sm p-4 mb-4">
-          <p className="text-sm font-semibold text-amber-800 mb-1">⚠ Não retornamos — 100% controlável, sem custo de mídia</p>
-          <p className="text-xs text-amber-700 mb-3">
-            {totalNaoRetornamos} de {totalLost} perdas ({naoRetornamosRateGeral !== null ? formatPercent(naoRetornamosRateGeral) : '—'}) no período foram por falta de retorno nosso, não por concorrência/preço/mercado.
-          </p>
-          {totalNaoRetornamos > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {lostVendors.filter(v => (naoRetornamosByVendor[v]?.naoRetornamos ?? 0) > 0).map(v => {
-                const nr = naoRetornamosByVendor[v]
-                const rate = nr.totalLost > 0 ? nr.naoRetornamos / nr.totalLost : null
-                return (
-                  <span key={v} className="text-xs bg-white border border-amber-200 rounded-sm px-2 py-1 text-amber-800">
-                    {v}: {nr.naoRetornamos}/{nr.totalLost} ({rate !== null ? formatPercent(rate) : '—'})
-                  </span>
-                )
-              })}
-            </div>
-          )}
-        </div>
-        <div className="bg-white rounded-sm border p-6 mb-8">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-slate-500 text-left">
-                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
-                  {LOST_REASONS.map(r => (
-                    <th key={r} className="pb-3 pr-4 font-medium text-right whitespace-nowrap">{LOST_REASON_LABELS[r]}</th>
-                  ))}
-                  <th className="pb-3 font-medium text-right">Outro</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lostVendors.map(v => (
-                  <tr key={v} className="border-b last:border-0 hover:bg-slate-50">
-                    <td className={`py-2.5 pr-4 ${v === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>
-                      {v === SEM_VENDEDOR ? v : (
-                        <Link href={`/vendedores/${encodeURIComponent(v)}`} className="text-brand-dark-green hover:underline">{v}</Link>
-                      )}
-                    </td>
-                    {LOST_REASONS.map(r => (
-                      <td key={r} className={`py-2.5 pr-4 text-right ${r === 'nao_retornamos' ? 'font-semibold text-amber-700' : 'text-slate-600'}`}>
-                        {lostByVendor[v][r] ?? 0}
-                      </td>
-                    ))}
-                    <td className="py-2.5 text-right text-slate-400">{lostByVendor[v].outro ?? 0}</td>
-                  </tr>
-                ))}
-                {lostVendors.length === 0 && (
-                  <tr>
-                    <td colSpan={LOST_REASONS.length + 2} className="py-6 text-center text-slate-400 text-sm">Nenhuma venda perdida no período</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Motivo de Venda Ganha por Vendedor · {periodLabel}</h3>
-        <p className="text-xs text-slate-400 mb-4">Por data de fechamento (closedate) no período. Valores fora das 6 categorias do HubSpot caem em &quot;Outro&quot;.</p>
-        <div className="bg-white rounded-sm border p-6 mb-8">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-slate-500 text-left">
-                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
-                  {WON_REASONS.map(r => (
-                    <th key={r} className="pb-3 pr-4 font-medium text-right whitespace-nowrap">{WON_REASON_LABELS[r]}</th>
-                  ))}
-                  <th className="pb-3 font-medium text-right">Outro</th>
-                </tr>
-              </thead>
-              <tbody>
-                {wonVendors.map(v => (
-                  <tr key={v} className="border-b last:border-0 hover:bg-slate-50">
-                    <td className={`py-2.5 pr-4 ${v === SEM_VENDEDOR ? 'text-slate-400 font-normal' : 'font-medium'}`}>
-                      {v === SEM_VENDEDOR ? v : (
-                        <Link href={`/vendedores/${encodeURIComponent(v)}`} className="text-brand-dark-green hover:underline">{v}</Link>
-                      )}
-                    </td>
-                    {WON_REASONS.map(r => (
-                      <td key={r} className="py-2.5 pr-4 text-right text-slate-600">{wonByVendor[v][r] ?? 0}</td>
-                    ))}
-                    <td className="py-2.5 text-right text-slate-400">{wonByVendor[v].outro ?? 0}</td>
-                  </tr>
-                ))}
-                {wonVendors.length === 0 && (
-                  <tr>
-                    <td colSpan={WON_REASONS.length + 2} className="py-6 text-center text-slate-400 text-sm">Nenhuma venda ganha no período</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Desempenho por Canal · {periodLabel}</h3>
-        <p className="text-xs text-slate-400 mb-4">Todos os leads do período por data de criação (origem_do_lead), não só os fechados. Geral, não separado por vendedor.</p>
-        <div className="bg-white rounded-sm border p-6 mb-8">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-slate-500 text-left">
-                  <th className="pb-3 pr-4 font-medium">Canal</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Leads</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Ganhos</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Conversão</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Ticket Médio</th>
-                  <th className="pb-3 font-medium text-right">Receita</th>
-                </tr>
-              </thead>
-              <tbody>
-                {canalRows.map(c => (
-                  <tr key={c.canal} className={`border-b last:border-0 hover:bg-slate-50 ${c.canal === 'Cliente Instagram' ? 'bg-violet-50/50' : ''}`}>
-                    <td className="py-2.5 pr-4 font-medium">{c.canal}</td>
-                    <td className="py-2.5 pr-4 text-right">{c.leads}</td>
-                    <td className="py-2.5 pr-4 text-right">{c.ganhos}</td>
-                    <td className="py-2.5 pr-4 text-right">{formatPercent(c.conversao)}</td>
-                    <td className="py-2.5 pr-4 text-right">{c.ticketMedio !== null ? formatCurrency(c.ticketMedio) : '—'}</td>
-                    <td className="py-2.5 text-right font-medium text-emerald-700">{formatCurrency(c.receita || null)}</td>
-                  </tr>
-                ))}
-                {canalRows.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="py-6 text-center text-slate-400 text-sm">Sem dado de canal no período</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Instagram por Vendedor · {periodLabel}</h3>
-        <p className="text-xs text-slate-400 mb-4">
-          &quot;Veio do Instagram&quot; = origem_do_lead &quot;Cliente Instagram&quot; + hs_analytics_source &quot;SOCIAL_MEDIA&quot; (inclui conversa que migrou pro WhatsApp
-          mas começou no Instagram) — exclui clique de anúncio pago e cadastro manual.
-        </p>
-        <div className="bg-violet-50 border border-violet-200 rounded-sm p-6">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-violet-200 text-slate-500 text-left">
-                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Leads</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Ganhos</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Conversão</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Ticket Médio</th>
-                  <th className="pb-3 font-medium text-right">Receita</th>
-                </tr>
-              </thead>
-              <tbody>
-                {instagramRows.map(r => (
-                  <tr key={r.vendedor} className="border-b border-violet-100 last:border-0">
-                    <td className="py-2.5 pr-4 font-medium text-violet-900">{r.vendedor}</td>
-                    <td className="py-2.5 pr-4 text-right">{r.leads}</td>
-                    <td className="py-2.5 pr-4 text-right">{r.ganhos}</td>
-                    <td className="py-2.5 pr-4 text-right">{formatPercent(r.conversao)}</td>
-                    <td className="py-2.5 pr-4 text-right">{r.ticketMedio !== null ? formatCurrency(r.ticketMedio) : '—'}</td>
-                    <td className="py-2.5 text-right font-medium text-emerald-700">{formatCurrency(r.receita || null)}</td>
-                  </tr>
-                ))}
-                {instagramRows.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="py-6 text-center text-violet-400 text-sm">Nenhum lead do Instagram no período</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Tempo de Resposta ao Lead · {periodLabel}</h3>
-        <p className="text-xs text-slate-400 mb-4">
-          Mediana ponderada pelo volume de leads de cada dia (não média entre dias). &quot;Pior dia&quot; sinalizado quando
-          passa de 3x a mediana do vendedor — a fonte tem casos reais de dias de atraso que distorcem uma média simples.
-        </p>
-        <div className="bg-white rounded-sm border p-6 mb-8">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-slate-500 text-left">
-                  <th className="pb-3 pr-4 font-medium">Vendedor</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Leads Respondidos</th>
-                  <th className="pb-3 pr-4 font-medium text-right">Tempo de Resposta (mediana)</th>
-                  <th className="pb-3 font-medium text-right">Pior Dia</th>
-                </tr>
-              </thead>
-              <tbody>
-                {speedRows.map(s => (
-                  <tr key={s.vendedor} className="border-b last:border-0 hover:bg-slate-50">
-                    <td className="py-2.5 pr-4 font-medium">{s.vendedor}</td>
-                    <td className="py-2.5 pr-4 text-right">{s.leads}</td>
-                    <td className="py-2.5 pr-4 text-right font-semibold">
-                      {s.medianaPonderada !== null ? formatMinutes(s.medianaPonderada) : '—'}
-                    </td>
-                    <td className="py-2.5 text-right">
-                      {s.maxDay ? (
-                        <span className={s.isOutlier ? 'text-red-600 font-medium' : 'text-slate-500'}>
-                          {s.isOutlier && '⚠ '}{formatMinutes(s.maxDay.minutos)} ({new Date(s.maxDay.data).toLocaleDateString('pt-BR')})
-                        </span>
-                      ) : '—'}
-                    </td>
-                  </tr>
-                ))}
-                {speedRows.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="py-6 text-center text-slate-400 text-sm">Sem dado de tempo de resposta no período</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Parceiros por Vendedor</h3>
-        <p className="text-xs text-slate-400 mb-4">Estado atual dos parceiros (últimos 35 dias), agrupado pelo dono no HubSpot.</p>
+        <h3 className="text-sm font-semibold mt-8 mb-2 text-slate-600">Funil de Parceiros por Vendedor · {periodLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">Estágio de cada parceiro ao final do período selecionado, agrupado pelo dono no HubSpot.</p>
         <div className="bg-white rounded-sm border p-6">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

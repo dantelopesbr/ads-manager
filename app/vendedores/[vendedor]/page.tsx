@@ -9,6 +9,7 @@ import { getPerformanceVendedorDiario, getMetaVendedorMensal } from '@/lib/perfo
 import { getResumoDiario } from '@/lib/atividade-comercial'
 import { computeVendorScore } from '@/lib/vendor-score'
 import { getDealMotivoFechamento } from '@/lib/motivo-fechamento'
+import { getLeadCanalVendedor, isInstagramLead } from '@/lib/lead-canal'
 import { DealMotivoList } from '@/components/vendedores/deal-motivo-list'
 import Link from 'next/link'
 
@@ -79,12 +80,38 @@ export default async function VendorReportPage({
   const mesLabel = format(parseISO(`${mes}-01`), 'MMMM yyyy', { locale: ptBR })
 
   const { start: mesStart, end: mesEnd } = monthRange(mes)
-  const [curr, prev, motivoFechamento] = await Promise.all([
+  const [curr, prev, motivoFechamento, leadCanal] = await Promise.all([
     summarizeMonth(supabase, vendedor, mes),
     summarizeMonth(supabase, vendedor, prevMes),
     getDealMotivoFechamento(supabase, mesStart, mesEnd),
+    getLeadCanalVendedor(supabase, mesStart, mesEnd),
   ])
   const meusDeals = motivoFechamento.filter(d => (d.vendedor?.trim() || null) === vendedor)
+  const meusLeadsCanal = leadCanal.filter(d => (d.vendedor?.trim() || null) === vendedor)
+
+  // Canal de origem dos leads desse vendedor no mês — mesmo cruzamento que
+  // já existia na visão geral, agora como detalhe de um vendedor por vez.
+  type CanalAgg = { leads: number; ganhos: number; receita: number }
+  const canalStats: Record<string, CanalAgg> = {}
+  for (const r of meusLeadsCanal) {
+    const canal = r.origem_do_lead ?? 'Sem origem'
+    if (!canalStats[canal]) canalStats[canal] = { leads: 0, ganhos: 0, receita: 0 }
+    canalStats[canal].leads += 1
+    if (r.dealstage === 'closedwon') {
+      canalStats[canal].ganhos += 1
+      canalStats[canal].receita += r.amount ?? 0
+    }
+  }
+  const canalRows = Object.entries(canalStats)
+    .map(([canal, c]) => ({
+      canal, ...c,
+      conversao: c.leads > 0 ? c.ganhos / c.leads : null,
+      ticketMedio: c.ganhos > 0 ? c.receita / c.ganhos : null,
+    }))
+    .sort((a, b) => b.leads - a.leads)
+
+  const instagramLeads = meusLeadsCanal.filter(isInstagramLead)
+  const instagramGanhos = instagramLeads.filter(r => r.dealstage === 'closedwon').length
 
   const deltaReceita = calcDelta(curr.receita, prev.receita)
   const deltaCriados = calcDelta(curr.criados, prev.criados)
@@ -151,6 +178,45 @@ export default async function VendorReportPage({
         <h3 className="text-sm font-semibold mb-1 text-slate-600 mt-8">Deals por Motivo — {mesLabel}</h3>
         <p className="text-xs text-slate-400 mb-4">Vendas ganhas e perdidas do mês, agrupadas por motivo — clica pra ver os deals de cada categoria.</p>
         <DealMotivoList deals={meusDeals} />
+
+        <h3 className="text-sm font-semibold mb-1 text-slate-600 mt-8">Canal de Origem — {mesLabel}</h3>
+        <p className="text-xs text-slate-400 mb-4">
+          Leads criados no mês por origem_do_lead.
+          {instagramLeads.length > 0 && ` ${instagramLeads.length} vieram do Instagram (${instagramGanhos} ganhos).`}
+        </p>
+        <div className="bg-white rounded-sm border p-6">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-slate-500 text-left">
+                  <th className="pb-3 pr-4 font-medium">Canal</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Leads</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Ganhos</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Conversão</th>
+                  <th className="pb-3 pr-4 font-medium text-right">Ticket Médio</th>
+                  <th className="pb-3 font-medium text-right">Receita</th>
+                </tr>
+              </thead>
+              <tbody>
+                {canalRows.map(c => (
+                  <tr key={c.canal} className={`border-b last:border-0 hover:bg-slate-50 ${c.canal === 'Cliente Instagram' ? 'bg-violet-50/50' : ''}`}>
+                    <td className="py-2.5 pr-4 font-medium">{c.canal}</td>
+                    <td className="py-2.5 pr-4 text-right">{c.leads}</td>
+                    <td className="py-2.5 pr-4 text-right">{c.ganhos}</td>
+                    <td className="py-2.5 pr-4 text-right">{formatPercent(c.conversao)}</td>
+                    <td className="py-2.5 pr-4 text-right">{c.ticketMedio !== null ? formatCurrency(c.ticketMedio) : '—'}</td>
+                    <td className="py-2.5 text-right font-medium text-emerald-700">{formatCurrency(c.receita || null)}</td>
+                  </tr>
+                ))}
+                {canalRows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-slate-400 text-sm">Sem lead no período</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </main>
     </div>
   )
