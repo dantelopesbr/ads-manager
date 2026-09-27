@@ -11,6 +11,7 @@ import { computeVendorScore } from '@/lib/vendor-score'
 import { getDealMotivoFechamento } from '@/lib/motivo-fechamento'
 import { getLeadCanalVendedor, isInstagramLead } from '@/lib/lead-canal'
 import { DealMotivoList } from '@/components/vendedores/deal-motivo-list'
+import { VendorSelect } from '@/components/vendedores/vendor-select'
 import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
@@ -89,6 +90,10 @@ export default async function VendorReportPage({
   const meusDeals = motivoFechamento.filter(d => (d.vendedor?.trim() || null) === vendedor)
   const meusLeadsCanal = leadCanal.filter(d => (d.vendedor?.trim() || null) === vendedor)
 
+  // Lista pra trocar de vendedor sem voltar pra página principal — inclui o
+  // atual mesmo se ele não tiver deal nesse mês específico.
+  const knownVendors = [...new Set([vendedor, ...leadCanal.map(r => r.vendedor?.trim()).filter((v): v is string => !!v)])].sort()
+
   // Canal de origem dos leads desse vendedor no mês — mesmo cruzamento que
   // já existia na visão geral, agora como detalhe de um vendedor por vez.
   type CanalAgg = { leads: number; ganhos: number; receita: number }
@@ -127,7 +132,10 @@ export default async function VendorReportPage({
     <div className="flex">
       <Nav />
       <main className="flex-1 p-8">
-        <Link href="/vendedores" className="text-xs text-slate-400 hover:underline">← Vendedores</Link>
+        <div className="flex items-center gap-3">
+          <Link href="/vendedores" className="text-xs text-slate-400 hover:underline">← Vendedores</Link>
+          <VendorSelect current={vendedor} vendors={knownVendors} mes={mes} />
+        </div>
         <div className="flex items-center justify-between mt-1 mb-2">
           <h2 className="text-2xl font-bold">{vendedor}</h2>
           <div className="flex items-center gap-3 text-sm">

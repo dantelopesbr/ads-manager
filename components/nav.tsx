@@ -55,6 +55,7 @@ const links = [
   { href: '/leads', label: 'Leads' },
   { href: '/sem-atendimento', label: 'Sem Atendimento' },
   { href: '/vendedores', label: 'Vendedores' },
+  { href: '/criativos', label: 'Criativos' },
   { href: '/settings', label: 'Configurações' },
 ]
 
