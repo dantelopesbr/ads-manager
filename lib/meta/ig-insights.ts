@@ -29,23 +29,8 @@ interface IgMediaRaw {
   comments_count?: number
 }
 
-export async function fetchIgMedia(
-  accessToken: string,
-  igBusinessId: string,
-  limit = 30
-): Promise<IgMedia[]> {
-  const params = new URLSearchParams({
-    fields: 'id,caption,media_type,media_product_type,permalink,thumbnail_url,media_url,timestamp,like_count,comments_count',
-    limit: String(limit),
-    access_token: accessToken,
-  })
-  const res = await fetch(`${BASE_URL}/${igBusinessId}/media?${params}`)
-  if (!res.ok) {
-    const error: unknown = await res.json()
-    throw new Error(`Meta API error: ${JSON.stringify(error)}`)
-  }
-  const json: { data?: IgMediaRaw[] } = await res.json()
-  return (json.data ?? []).map(m => ({
+function mapMedia(m: IgMediaRaw): IgMedia {
+  return {
     id: m.id,
     caption: m.caption ?? null,
     media_type: m.media_type,
@@ -56,7 +41,42 @@ export async function fetchIgMedia(
     timestamp: m.timestamp,
     like_count: m.like_count ?? 0,
     comments_count: m.comments_count ?? 0,
-  }))
+  }
+}
+
+const MEDIA_FIELDS = 'id,caption,media_type,media_product_type,permalink,thumbnail_url,media_url,timestamp,like_count,comments_count'
+
+// Safety cap on pagination — this account posts ~3-4x/day, so 30 days is
+// normally ~100-120 posts; this just bounds a runaway account from blowing
+// up the per-post insights fan-out below.
+const MAX_POSTS_BY_DATE = 300
+
+/**
+ * All posts published since `sinceUnix` (seconds) — paginates via the API's
+ * own `since` cutoff (verified live: it stops paging exactly at the
+ * boundary), not a fixed post count.
+ */
+export async function fetchIgMediaSince(
+  accessToken: string,
+  igBusinessId: string,
+  sinceUnix: number
+): Promise<IgMedia[]> {
+  const params = new URLSearchParams({
+    fields: MEDIA_FIELDS, limit: '50', since: String(sinceUnix), access_token: accessToken,
+  })
+  let url: string | null = `${BASE_URL}/${igBusinessId}/media?${params}`
+  const results: IgMedia[] = []
+  while (url && results.length < MAX_POSTS_BY_DATE) {
+    const res: Response = await fetch(url)
+    if (!res.ok) {
+      const error: unknown = await res.json()
+      throw new Error(`Meta API error: ${JSON.stringify(error)}`)
+    }
+    const json: { data?: IgMediaRaw[]; paging?: { next?: string } } = await res.json()
+    results.push(...(json.data ?? []).map(mapMedia))
+    url = json.paging?.next ?? null
+  }
+  return results
 }
 
 export interface IgMediaInsights {
@@ -95,12 +115,16 @@ function computeEngagementScore(m: IgMedia, ins: IgMediaInsights): number {
   return m.like_count + m.comments_count * 2 + (ins.saved ?? 0) * 3 + (ins.shares ?? 0) * 4
 }
 
+const DEFAULT_WINDOW_DAYS = 30
+
+/** Ranks every post published in the last `windowDays` days (by date, not a fixed post count). */
 export async function getCreativeRanking(
   accessToken: string,
   igBusinessId: string,
-  limit = 30
+  windowDays = DEFAULT_WINDOW_DAYS
 ): Promise<CreativeRow[]> {
-  const media = await fetchIgMedia(accessToken, igBusinessId, limit)
+  const sinceUnix = Math.floor(Date.now() / 1000) - windowDays * 24 * 60 * 60
+  const media = await fetchIgMediaSince(accessToken, igBusinessId, sinceUnix)
   const insights = await Promise.all(media.map(m => fetchIgMediaInsights(accessToken, m.id)))
   return media.map((m, i) => {
     const ins = insights[i]
