@@ -2,68 +2,180 @@ import { createClient } from '@/lib/supabase/server'
 import { Nav } from '@/components/nav'
 import { KpiCard } from '@/components/dashboard/kpi-card'
 import { PerformanceChart } from '@/components/dashboard/performance-chart'
-import { calcCPL, calcROAS, formatCurrency, formatROAS } from '@/lib/metrics'
-import { format, subDays } from 'date-fns'
+import { FunnelChart } from '@/components/dashboard/funnel-chart'
+import { DateFilter } from '@/components/date-filter'
+import { calcCPL, calcROAS, formatCurrency, formatROAS, formatPercent, calcDelta } from '@/lib/metrics'
+import { bucketDealStage, type FunnelBucket } from '@/lib/deal-stages'
+import { format, subDays, differenceInCalendarDays, parseISO } from 'date-fns'
+import { Suspense } from 'react'
+import { getAccountSelection } from '@/lib/account-server'
+import { ACCOUNT_KEYS, type AccountKey } from '@/lib/account'
+import {
+  getDashboardPeriodData, getAccountTarget, getDashboardLeadStages,
+  type DailySpend, type DailyLeads, type DealTotals,
+} from '@/lib/queries'
+import { getResumoDiario, getAtividadeLog, getParceiroStatusLog, getPartnerCurrentStatus } from '@/lib/atividade-comercial'
+import { fetchOwners } from '@/lib/hubspot/client'
+import { VendorActivityCards } from '@/components/dashboard/vendor-activity-cards'
+import { VendorActivityLog } from '@/components/dashboard/vendor-activity-log'
+import { PartnerStageChart } from '@/components/dashboard/partner-stage-chart'
+import { PartnerFunnel } from '@/components/dashboard/partner-funnel'
 
 export const dynamic = 'force-dynamic'
 
-export default async function DashboardPage() {
+function summarize(insights: DailySpend[], conversionsDaily: DailyLeads[], dealTotals: DealTotals) {
+  const totalSpend = insights.reduce((s, r) => s + (r.spend ?? 0), 0)
+  const totalLeads = conversionsDaily.reduce((s, r) => s + Number(r.leads), 0)
+  const cpl = calcCPL(totalSpend, totalLeads)
+  const roasReal = calcROAS(dealTotals.won_deal_value > 0 ? dealTotals.won_deal_value : null, totalSpend)
+  const roasProjected = calcROAS(dealTotals.total_deal_value > 0 ? dealTotals.total_deal_value : null, totalSpend)
+  const conversionRate = totalLeads > 0 ? dealTotals.deal_count / totalLeads : null
+  // Custo por cliente fechado — distinct from CPL (cost per lead) and ROAS
+  // (revenue ratio): what a won sale actually cost in ad spend.
+  const cac = dealTotals.won_count > 0 ? totalSpend / dealTotals.won_count : null
+  return { totalSpend, totalLeads, cpl, roasReal, roasProjected, conversionRate, cac }
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>
+}) {
   const supabase = await createClient()
-  const since = format(subDays(new Date(), 30), 'yyyy-MM-dd')
-  const until = format(new Date(), 'yyyy-MM-dd')
+  const { from, to } = await searchParams
+  const today = format(new Date(), 'yyyy-MM-dd')
+  const defaultSince = format(subDays(new Date(), 29), 'yyyy-MM-dd')
+  const since = from ?? defaultSince
+  const until = to ?? today
 
-  const [{ data: insights }, { count: totalLeads }, { data: allDeals }, { data: wonDeals }] = await Promise.all([
-    supabase.from('meta_insights').select('spend, date').gte('date', since).lte('date', until),
-    supabase.from('meta_ads_conversions').select('*', { count: 'exact', head: true }).gte('created_at', since),
-    supabase.from('hubspot_contacts').select('deal_value').not('deal_value', 'is', null),
-    supabase.from('hubspot_contacts').select('deal_value').eq('deal_stage', 'closedwon').not('deal_value', 'is', null),
+  // Previous period: same length, immediately preceding `since`.
+  const periodDays = differenceInCalendarDays(parseISO(until), parseISO(since)) + 1
+  const prevUntil = format(subDays(parseISO(since), 1), 'yyyy-MM-dd')
+  const prevSince = format(subDays(parseISO(prevUntil), periodDays - 1), 'yyyy-MM-dd')
+
+  const selection = await getAccountSelection()
+  const accountKeys: AccountKey[] = selection === 'all' ? ACCOUNT_KEYS : [selection]
+
+  const [current, previous, target, leadStages, resumoDiario, atividadeLog, parceiroStatusLog, partnerCurrent, owners] = await Promise.all([
+    getDashboardPeriodData(supabase, accountKeys, since, until),
+    getDashboardPeriodData(supabase, accountKeys, prevSince, prevUntil),
+    selection === 'all' ? Promise.resolve({ cpl_target: null, roas_target: null }) : getAccountTarget(supabase, selection),
+    getDashboardLeadStages(supabase, accountKeys, since, until),
+    getResumoDiario(supabase, since, until),
+    getAtividadeLog(supabase, since, until),
+    getParceiroStatusLog(supabase, since, until),
+    getPartnerCurrentStatus(supabase),
+    fetchOwners(process.env.HUBSPOT_API_KEY!).catch(() => []),
   ])
+  const ownerNameById = Object.fromEntries(owners.map(o => [o.id, o.name]))
 
-  const totalSpend = (insights ?? []).reduce((sum, r) => sum + (r.spend ?? 0), 0)
-  const totalDealValue = (allDeals ?? []).reduce((sum, r) => sum + (r.deal_value ?? 0), 0)
-  const wonDealValue = (wonDeals ?? []).reduce((sum, r) => sum + (r.deal_value ?? 0), 0)
-  const cpl = calcCPL(totalSpend, totalLeads ?? 0)
-  const roasProjected = calcROAS(totalDealValue, totalSpend)
-  const roasReal = calcROAS(wonDealValue > 0 ? wonDealValue : null, totalSpend)
+  const funnelCounts: Partial<Record<FunnelBucket, number>> = {}
+  for (const l of leadStages) {
+    const bucket = bucketDealStage(l.deal_stage)
+    funnelCounts[bucket] = (funnelCounts[bucket] ?? 0) + 1
+  }
+  const { insights, conversionsDaily, dealTotals } = current
 
-  const byDate: Record<string, { spend: number }> = {}
-  for (const row of insights ?? []) {
-    if (!byDate[row.date]) byDate[row.date] = { spend: 0 }
+  const curr = summarize(current.insights, current.conversionsDaily, current.dealTotals)
+  const prev = summarize(previous.insights, previous.conversionsDaily, previous.dealTotals)
+  const { totalSpend, totalLeads, cpl, roasReal, roasProjected, conversionRate, cac } = curr
+
+  const spendDelta = calcDelta(curr.totalSpend, prev.totalSpend)
+  const leadsDelta = calcDelta(curr.totalLeads, prev.totalLeads)
+  const cplDelta = calcDelta(curr.cpl, prev.cpl)
+  const roasRealDelta = calcDelta(curr.roasReal, prev.roasReal)
+  const roasProjectedDelta = calcDelta(curr.roasProjected, prev.roasProjected)
+  const conversionDelta = calcDelta(curr.conversionRate, prev.conversionRate)
+  const cacDelta = calcDelta(curr.cac, prev.cac)
+
+  const byDate: Record<string, { spend: number; leads: number }> = {}
+  for (const row of insights) {
+    if (!byDate[row.date]) byDate[row.date] = { spend: 0, leads: 0 }
     byDate[row.date].spend += row.spend ?? 0
   }
-
-  const { data: dailyLeads } = await supabase
-    .from('meta_ads_conversions')
-    .select('created_at')
-    .gte('created_at', since)
-
-  const leadsByDate: Record<string, number> = {}
-  for (const row of dailyLeads ?? []) {
-    const d = row.created_at.split('T')[0]
-    leadsByDate[d] = (leadsByDate[d] ?? 0) + 1
+  for (const row of conversionsDaily) {
+    if (!byDate[row.day]) byDate[row.day] = { spend: 0, leads: 0 }
+    byDate[row.day].leads += Number(row.leads)
   }
 
-  const chartData = Object.keys(byDate).sort().map(date => ({
-    date,
-    spend: Math.round(byDate[date].spend),
-    leads: leadsByDate[date] ?? 0,
-  }))
+  const chartData = Object.keys(byDate).sort().map(date => {
+    const { spend, leads } = byDate[date]
+    return {
+      date,
+      spend: Math.round(spend),
+      leads,
+      cpl: leads > 0 ? Math.round(spend / leads) : null,
+    }
+  })
+
+  const periodLabel = `${since} → ${until}`
 
   return (
     <div className="flex">
       <Nav />
       <main className="flex-1 p-8">
-        <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-          <KpiCard title="Total Spend" value={formatCurrency(totalSpend)} subtitle="últimos 30 dias" />
-          <KpiCard title="Leads" value={String(totalLeads ?? 0)} subtitle="últimos 30 dias" />
-          <KpiCard title="CPL" value={formatCurrency(cpl)} />
-          <KpiCard title="ROAS Real" value={formatROAS(roasReal)} subtitle="deals fechados (won)" />
-          <KpiCard title="ROAS Projetado" value={formatROAS(roasProjected)} subtitle="todos os deals" />
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold">Dashboard</h2>
+            {selection === 'all' && (
+              <span className="text-xs font-medium text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">
+                Todas as contas
+              </span>
+            )}
+          </div>
+          <Suspense fallback={null}>
+            <DateFilter from={since ?? ''} to={until} />
+          </Suspense>
         </div>
-        <div className="bg-white rounded-xl border p-6">
-          <h3 className="text-sm font-semibold mb-4 text-slate-600">Leads + Spend (30 dias)</h3>
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
+          <KpiCard title="Total Spend" value={formatCurrency(totalSpend)} subtitle={periodLabel} delta={spendDelta} positiveIsGood={false} />
+          <KpiCard title="Leads" value={String(totalLeads)} subtitle={periodLabel} delta={leadsDelta} />
+          <KpiCard
+            title="CPL" value={formatCurrency(cpl)} delta={cplDelta} positiveIsGood={false}
+            target={target.cpl_target != null ? { label: formatCurrency(target.cpl_target), met: cpl !== null && cpl <= target.cpl_target } : null}
+          />
+          <KpiCard title="Lead → Deal" value={formatPercent(conversionRate)} subtitle={`${dealTotals.deal_count} de ${totalLeads} leads`} delta={conversionDelta} />
+          <KpiCard
+            title="ROAS Real" value={formatROAS(roasReal)} subtitle="deals fechados (won)" delta={roasRealDelta}
+            target={target.roas_target != null ? { label: formatROAS(target.roas_target), met: roasReal !== null && roasReal >= target.roas_target } : null}
+          />
+          <KpiCard title="ROAS Projetado" value={formatROAS(roasProjected)} subtitle="todos os deals" delta={roasProjectedDelta} />
+          <KpiCard
+            title="CAC" value={formatCurrency(cac)} subtitle={`${dealTotals.won_count} venda${dealTotals.won_count !== 1 ? 's' : ''} fechada${dealTotals.won_count !== 1 ? 's' : ''}`}
+            delta={cacDelta} positiveIsGood={false}
+          />
+        </div>
+        <p className="text-xs text-slate-400 -mt-6 mb-6">vs. período anterior ({prevSince} → {prevUntil})</p>
+        <div className="bg-white rounded-sm border p-6 mb-8">
+          <h3 className="text-sm font-semibold mb-4 text-slate-600">Leads + Spend · {periodLabel}</h3>
           <PerformanceChart data={chartData} />
+        </div>
+        <div className="bg-white rounded-sm border p-6 mb-8">
+          <h3 className="text-sm font-semibold mb-4 text-slate-600">Funil de Vendas · {periodLabel}</h3>
+          <FunnelChart counts={funnelCounts} total={leadStages.length} />
+        </div>
+
+        <h3 className="text-lg font-bold mb-4">Atividade Comercial</h3>
+
+        <h4 className="text-sm font-semibold mb-3 text-slate-600">Atividade por vendedor · {periodLabel}</h4>
+        <div className="mb-8">
+          <VendorActivityCards rows={resumoDiario} />
+        </div>
+
+        <h4 className="text-sm font-semibold mb-3 text-slate-600">Conversas · {periodLabel}</h4>
+        <div className="mb-8">
+          <VendorActivityLog rows={atividadeLog} />
+        </div>
+
+        <div className="bg-white rounded-sm border p-6 mb-8">
+          <h4 className="text-sm font-semibold mb-4 text-slate-600">Estágio dos Parceiros · {periodLabel}</h4>
+          <PartnerStageChart rows={parceiroStatusLog} />
+        </div>
+
+        <div className="bg-white rounded-sm border p-6">
+          <h4 className="text-sm font-semibold mb-1 text-slate-600">Funil de Parceiros</h4>
+          <p className="text-xs text-slate-400 mb-4">Estado atual · {partnerCurrent.length} parceiros rastreados</p>
+          <PartnerFunnel partners={partnerCurrent} ownerNameById={ownerNameById} />
         </div>
       </main>
     </div>

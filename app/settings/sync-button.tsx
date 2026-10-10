@@ -11,10 +11,7 @@ export function SyncButton({ endpoint, label }: { endpoint: string; label: strin
     setLoading(true)
     setResult(null)
     try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET ?? ''}` },
-      })
+      const res = await fetch(endpoint, { method: 'POST' })
       const json = await res.json()
       setResult(res.ok ? 'OK' : `Erro: ${json.error}`)
     } catch {
