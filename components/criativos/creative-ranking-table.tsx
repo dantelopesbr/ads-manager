@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { formatPercent } from '@/lib/metrics'
@@ -19,9 +19,10 @@ export interface CreativeRankingRow {
   reach: number | null
   engagementScore: number
   engagementRate: number | null
+  categoria: string | null
 }
 
-type SortKey = Exclude<keyof CreativeRankingRow, 'thumbnail' | 'caption' | 'mediaType' | 'permalink' | 'id'>
+type SortKey = Exclude<keyof CreativeRankingRow, 'thumbnail' | 'caption' | 'mediaType' | 'permalink' | 'id' | 'categoria'>
 type SortDir = 'asc' | 'desc'
 
 const COLUMNS: { key: SortKey; label: string }[] = [
@@ -38,13 +39,21 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 export function CreativeRankingTable({ rows }: { rows: CreativeRankingRow[] }) {
   const [sortKey, setSortKey] = useState<SortKey>('engagementScore')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [categoriaFilter, setCategoriaFilter] = useState<string>('todas')
+
+  const categorias = useMemo(
+    () => [...new Set(rows.map(r => r.categoria).filter((c): c is string => !!c))].sort(),
+    [rows]
+  )
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(key); setSortDir('desc') }
   }
 
-  const sorted = [...rows].sort((a, b) => {
+  const filtered = categoriaFilter === 'todas' ? rows : rows.filter(r => r.categoria === categoriaFilter)
+
+  const sorted = [...filtered].sort((a, b) => {
     const av = a[sortKey]
     const bv = b[sortKey]
     if (av === null && bv === null) return 0
@@ -62,10 +71,24 @@ export function CreativeRankingTable({ rows }: { rows: CreativeRankingRow[] }) {
 
   return (
     <div className="overflow-x-auto">
+      {categorias.length > 0 && (
+        <div className="flex items-center gap-2 mb-4">
+          <label className="text-xs text-slate-500">Categoria:</label>
+          <select
+            value={categoriaFilter}
+            onChange={e => setCategoriaFilter(e.target.value)}
+            className="border rounded-sm px-2 py-1 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50"
+          >
+            <option value="todas">Todas</option>
+            {categorias.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      )}
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-slate-500 text-left">
             <th className="pb-3 pr-4 font-medium">Post</th>
+            <th className="pb-3 pr-4 font-medium whitespace-nowrap">Categoria</th>
             {COLUMNS.map(c => (
               <th
                 key={c.key}
@@ -94,6 +117,11 @@ export function CreativeRankingTable({ rows }: { rows: CreativeRankingRow[] }) {
                   </div>
                 </a>
               </td>
+              <td className="py-2.5 pr-4 whitespace-nowrap">
+                {r.categoria
+                  ? <span className="text-xs font-medium bg-slate-100 text-slate-700 rounded-full px-2 py-0.5">{r.categoria}</span>
+                  : <span className="text-xs text-slate-300">—</span>}
+              </td>
               <td className="py-2.5 pr-4 text-right whitespace-nowrap">
                 {format(new Date(r.timestamp), 'dd/MM/yy', { locale: ptBR })}
               </td>
@@ -108,7 +136,7 @@ export function CreativeRankingTable({ rows }: { rows: CreativeRankingRow[] }) {
           ))}
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={COLUMNS.length + 1} className="py-6 text-center text-slate-400 text-sm">Sem posts encontrados</td>
+              <td colSpan={COLUMNS.length + 2} className="py-6 text-center text-slate-400 text-sm">Sem posts encontrados</td>
             </tr>
           )}
         </tbody>
