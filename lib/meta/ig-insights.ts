@@ -46,10 +46,10 @@ function mapMedia(m: IgMediaRaw): IgMedia {
 
 const MEDIA_FIELDS = 'id,caption,media_type,media_product_type,permalink,thumbnail_url,media_url,timestamp,like_count,comments_count'
 
-// Safety cap on pagination — this account posts ~3-4x/day, so 90 days is
-// normally ~300-350 posts; this just bounds a runaway account from blowing
-// up the per-post insights fan-out below.
-const MAX_POSTS_BY_DATE = 500
+// Safety cap on pagination — this account posts ~3-4x/day, so 365 days is
+// normally ~900 posts; this just bounds a runaway account from blowing up
+// the per-post insights fan-out below.
+const MAX_POSTS_BY_DATE = 1500
 
 /**
  * All posts published since `sinceUnix` (seconds) — paginates via the API's
@@ -115,7 +115,7 @@ function computeEngagementScore(m: IgMedia, ins: IgMediaInsights): number {
   return m.like_count + m.comments_count * 2 + (ins.saved ?? 0) * 3 + (ins.shares ?? 0) * 4
 }
 
-const DEFAULT_WINDOW_DAYS = 90
+const DEFAULT_WINDOW_DAYS = 365
 
 /** Ranks every post published in the last `windowDays` days (by date, not a fixed post count). */
 export async function getCreativeRanking(

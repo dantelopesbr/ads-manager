@@ -50,7 +50,7 @@ export default async function CriativosPage() {
       <main className="flex-1 p-8">
         <h2 className="text-2xl font-bold mb-1">Criativos</h2>
         <p className="text-sm text-slate-500 mb-6">
-          Posts do Instagram de {ACCOUNTS[account].label} dos últimos 90 dias, ordenados por engajamento orgânico — usa pra escolher o próximo criativo de anúncio. Posts que saem da janela continuam listados com o último desempenho salvo.
+          Posts do Instagram de {ACCOUNTS[account].label} dos últimos 365 dias, ordenados por engajamento orgânico — usa pra escolher o próximo criativo de anúncio. Posts que saem da janela continuam listados com o último desempenho salvo.
         </p>
         {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
         {!error && <CreativeRankingTable rows={rows} />}
